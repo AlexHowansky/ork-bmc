@@ -10,6 +10,9 @@ import { fullImagePath, thumbImagePath } from '../src/images/storage.ts';
 import { createMap, findMap } from '../src/models/maps.ts';
 import { Client, ensureSchema, makeMapPng, makeUser, signedInAs, uploadForm, uuidFromRedirect } from './helpers.ts';
 
+/** The escaped form a Tailwind class name takes inside a CSS selector. */
+const escapeClassName = (name: string): string => name.replace(/[:/.[\]%]/g, (char) => `\\${char}`);
+
 let admin: Client;
 let viewer: Client;
 let anonymous: Client;
@@ -234,6 +237,23 @@ describe('map lifecycle', () => {
     expect(html).toContain('data-name-from-file');
     expect(html).toMatch(/<input[^>]*id="name"[^>]*>/);
     expect(html.match(/<input[^>]*id="name"[^>]*>/)![0]).not.toContain('required');
+  });
+
+  test('the upload form offers a drop target carrying its own active classes', async () => {
+    const html = await (await admin.get('/maps/new')).text();
+
+    expect(html).toContain('data-dropzone');
+    expect(html).toContain('data-dropzone-message');
+    // app.js reads the highlight classes from here rather than naming them, so
+    // an empty attribute would leave a drop with no visible feedback.
+    const active = html.match(/data-dropzone-active="([^"]+)"/);
+    expect(active?.[1]).toBeTruthy();
+
+    // Every one of them has to survive the Tailwind build to have any effect.
+    const css = await Bun.file('public/app.css').text();
+    for (const name of active![1]!.split(' ')) {
+      expect(css).toContain(escapeClassName(name));
+    }
   });
 
   test('an upload with no name is named after the file', async () => {

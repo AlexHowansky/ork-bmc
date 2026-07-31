@@ -46,6 +46,20 @@ export const fieldError = 'mt-1 text-xs font-medium text-red-600 dark:text-red-4
 export const card =
   'rounded-xl border border-stone-200 bg-white shadow-sm dark:border-stone-800 dark:bg-stone-900';
 
+/**
+ * The upload form's drop target.
+ *
+ * `dropZoneActive` is added by `public/app.js` while a file is dragged over the
+ * box and removed again on leave or drop. It travels to the script in a data
+ * attribute on the element, so the class names stay here with the rest of them
+ * rather than being spelled out in JavaScript.
+ */
+export const dropZone =
+  'rounded-xl border-2 border-dashed border-stone-300 p-4 transition dark:border-stone-700';
+
+export const dropZoneActive =
+  'border-amber-500 bg-amber-50 dark:border-amber-400 dark:bg-amber-950/30';
+
 export const badge =
   'inline-flex items-center rounded-full bg-stone-100 px-2.5 py-0.5 text-xs font-medium text-stone-700 ' +
   'dark:bg-stone-800 dark:text-stone-300';

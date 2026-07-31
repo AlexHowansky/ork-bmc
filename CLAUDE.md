@@ -26,7 +26,10 @@ bun run db:migrate
 ## Things that will bite you
 
 - **Tailwind classes are compiled from source.** After adding a class in a
-  `.tsx` file, run `bun run css:build` or it simply will not apply.
+  `.tsx` file, run `bun run css:build` or it simply will not apply. `styles/app.css`
+  lists the scanned paths; `public/app.js` is one of them, but classes the script
+  toggles are better declared in `src/views/ui.ts` and passed to it in a data
+  attribute, as the upload drop zone does.
 - **Route order matters.** `adminRoutes` is mounted before `mapRoutes` in
   `server.tsx` because `/maps/new` would otherwise be swallowed by
   `/maps/:uuid`. Adding another literal `/maps/<word>` route needs the same care.

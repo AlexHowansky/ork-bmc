@@ -105,6 +105,8 @@ the following features:
 * When uploading a new map, default the map name to the file name of the
   uploaded file.
 
+* The upload form should accept drag-and-drop.
+
 ## Additional Rules
 
 Always obey the following rules:

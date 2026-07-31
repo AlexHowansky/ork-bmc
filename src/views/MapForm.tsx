@@ -3,7 +3,7 @@ import type { FC } from 'hono/jsx';
 
 import { config } from '../config.ts';
 import { CsrfInput } from './Layout.tsx';
-import { button, card, fieldError, hint, input, inputInvalid, label } from './ui.ts';
+import { button, card, dropZone, dropZoneActive, fieldError, hint, input, inputInvalid, label } from './ui.ts';
 
 export interface MapFormValues {
   name: string;
@@ -125,23 +125,31 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
           <label for="image" class={label}>
             Map file <span class="text-red-600 dark:text-red-400">*</span>
           </label>
-          {/* `data-name-from-file` is what public/app.js looks for, so it can
-              fill the name field in as soon as a file is chosen. */}
-          <input
-            id="image"
-            name="image"
-            type="file"
-            required
-            data-name-from-file
-            accept="image/png,image/jpeg,image/webp"
-            aria-describedby="image-hint"
-            aria-invalid={errors['image'] ? 'true' : undefined}
-            class="mt-1 block w-full text-sm text-stone-600 file:mr-4 file:rounded-lg file:border-0 file:bg-amber-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-amber-500 dark:text-stone-400 dark:file:bg-amber-500 dark:file:text-stone-950"
-          />
-          <p id="image-hint" class={hint}>
-            PNG, JPG, or WEBP, up to {Math.floor(config.maxUploadBytes / (1024 * 1024))} MB. Stored as lossless WEBP,
-            so no quality is lost.
-          </p>
+          {/* `data-dropzone` marks the drop target for public/app.js, which
+              hands anything dropped here to the file input below so the
+              ordinary form submission carries it. With JavaScript off this is
+              just a box around the file button, which still works. */}
+          <div data-dropzone data-dropzone-active={dropZoneActive} class={`mt-1 ${dropZone}`}>
+            {/* `data-name-from-file` is what public/app.js looks for, so it can
+                fill the name field in as soon as a file is chosen. */}
+            <input
+              id="image"
+              name="image"
+              type="file"
+              required
+              data-name-from-file
+              accept="image/png,image/jpeg,image/webp"
+              aria-describedby="image-hint"
+              aria-invalid={errors['image'] ? 'true' : undefined}
+              class="block w-full text-sm text-stone-600 file:mr-4 file:rounded-lg file:border-0 file:bg-amber-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-amber-500 dark:text-stone-400 dark:file:bg-amber-500 dark:file:text-stone-950"
+            />
+            <p id="image-hint" class={hint}>
+              PNG, JPG, or WEBP, up to {Math.floor(config.maxUploadBytes / (1024 * 1024))} MB — choose one, or drag it
+              onto this box. Stored as lossless WEBP, so no quality is lost.
+            </p>
+            {/* Filled in by app.js when a drop cannot be used; empty otherwise. */}
+            <p data-dropzone-message role="status" class={fieldError} />
+          </div>
           {errors['image'] && <p class={fieldError}>{errors['image']}</p>}
         </div>
       ) : (

@@ -7,6 +7,8 @@
  *   - Delete buttons ask for confirmation first.
  *   - Choosing a file names the map after it. The server derives the same name
  *     from a blank field, so this only makes it visible sooner.
+ *   - The upload box accepts a dragged file, handing it to the ordinary file
+ *     input so the form still posts in exactly the same way.
  *
  * Loaded from same-origin so the strict `script-src 'self'` CSP allows it.
  */
@@ -68,6 +70,110 @@
 
     field.value = nameFromFilename(file.name);
     field.setAttribute('data-autofilled', field.value);
+  });
+
+  // -------------------------------------------------------------------------
+  // Drag and drop onto the upload box
+  // -------------------------------------------------------------------------
+
+  function dropZoneOf(target) {
+    return target && target.closest ? target.closest('[data-dropzone]') : null;
+  }
+
+  /** Whether the drag carries files, as opposed to selected text or a link. */
+  function carriesFiles(transfer) {
+    if (!transfer) return false;
+    var types = transfer.types || [];
+    for (var i = 0; i < types.length; i++) {
+      if (types[i] === 'Files') return true;
+    }
+    return false;
+  }
+
+  // The active class names live in src/views/ui.ts and ride along in a data
+  // attribute, so this file never spells out a Tailwind class of its own.
+  function highlight(zone, on) {
+    var names = (zone.getAttribute('data-dropzone-active') || '').split(/\s+/);
+    for (var i = 0; i < names.length; i++) {
+      if (!names[i]) continue;
+      if (on) zone.classList.add(names[i]);
+      else zone.classList.remove(names[i]);
+    }
+  }
+
+  function say(zone, message) {
+    var element = zone.querySelector('[data-dropzone-message]');
+    if (element) element.textContent = message;
+  }
+
+  document.addEventListener('dragover', function (event) {
+    if (!carriesFiles(event.dataTransfer)) return;
+
+    var zone = dropZoneOf(event.target);
+    // Missing the box would otherwise navigate away to the dropped file and
+    // take the half-filled form with it, so swallow those drags too.
+    if (!zone) {
+      if (document.querySelector('[data-dropzone]')) event.preventDefault();
+      return;
+    }
+
+    // Without this the browser keeps the drop for itself.
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    highlight(zone, true);
+  });
+
+  document.addEventListener('dragleave', function (event) {
+    var zone = dropZoneOf(event.target);
+    // Crossing between the box's own children fires dragleave as well, so only
+    // react when the pointer has actually left the box.
+    if (!zone || (event.relatedTarget && zone.contains(event.relatedTarget))) return;
+    highlight(zone, false);
+  });
+
+  document.addEventListener('drop', function (event) {
+    if (!carriesFiles(event.dataTransfer)) return;
+
+    var zone = dropZoneOf(event.target);
+    if (!zone) {
+      if (document.querySelector('[data-dropzone]')) event.preventDefault();
+      return;
+    }
+
+    event.preventDefault();
+    highlight(zone, false);
+
+    var input = zone.querySelector('input[type="file"]');
+    var file = event.dataTransfer.files && event.dataTransfer.files[0];
+    if (!input || !file) return;
+
+    // One map per upload; a second file would silently be ignored otherwise.
+    if (event.dataTransfer.files.length > 1) {
+      say(zone, 'Only one file at a time — using “' + file.name + '”.');
+    } else {
+      say(zone, '');
+    }
+
+    // An empty type means the browser could not tell; let the server decide
+    // rather than refuse a file it would have accepted.
+    var accepted = (input.getAttribute('accept') || '').replace(/\s+/g, '').split(',');
+    if (file.type !== '' && accepted.indexOf(file.type) === -1) {
+      say(zone, '“' + file.name + '” is not a PNG, JPG or WEBP image.');
+      return;
+    }
+
+    try {
+      var transfer = new DataTransfer();
+      transfer.items.add(file);
+      input.files = transfer.files;
+    } catch (error) {
+      say(zone, 'This browser will not accept a dropped file — please use the button instead.');
+      return;
+    }
+
+    // Assigning `files` fires nothing, and the name-from-file handler above is
+    // listening for a change.
+    input.dispatchEvent(new Event('change', { bubbles: true }));
   });
 
   document.addEventListener('submit', function (event) {
