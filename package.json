@@ -1,0 +1,30 @@
+{
+  "name": "battle-mapper",
+  "version": "1.0.0",
+  "module": "src/server.tsx",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run css:build && bun --watch src/server.tsx",
+    "start": "bun run src/server.tsx",
+    "build": "bun run css:build",
+    "css:build": "bunx @tailwindcss/cli -i styles/app.css -o public/app.css --minify",
+    "css:watch": "bunx @tailwindcss/cli -i styles/app.css -o public/app.css --watch",
+    "db:migrate": "bun run src/db/migrate.ts",
+    "user": "bun run cli/user.ts",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "@types/bun": "latest",
+    "tailwindcss": "^4.3.3"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "hono": "^4.12.33",
+    "sharp": "^0.35.3"
+  }
+}

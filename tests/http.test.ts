@@ -1,0 +1,453 @@
+/**
+ * End-to-end HTTP behaviour: the access-control matrix, CSRF enforcement,
+ * search, and the guarantee that full-resolution maps need authentication.
+ */
+import { beforeAll, describe, expect, test } from 'bun:test';
+
+import { createMap } from '../src/models/maps.ts';
+import { Client, ensureSchema, makeMapPng, makeUser, signedInAs, uploadForm, uuidFromRedirect } from './helpers.ts';
+
+let admin: Client;
+let viewer: Client;
+let anonymous: Client;
+let mapUuid: string;
+let png: Buffer;
+
+beforeAll(async () => {
+  await ensureSchema();
+
+  admin = await signedInAs('admin');
+  viewer = await signedInAs('viewer');
+  anonymous = new Client();
+  png = await makeMapPng(280, 210, 70);
+
+  const response = await admin.post(
+    '/maps/new',
+    uploadForm(await admin.csrfToken(), png, {
+      name: 'Fixture River Crossing',
+      variant: 'day',
+      tags: 'forest road water',
+      gridSize: '70',
+    }),
+  );
+  mapUuid = uuidFromRedirect(response);
+  expect(mapUuid).toMatch(/^[0-9a-f-]{36}$/);
+});
+
+describe('access control', () => {
+  test('anonymous visitors are sent to sign in, never served the page', async () => {
+    for (const path of ['/maps', `/maps/${mapUuid}`, '/maps/new']) {
+      const response = await anonymous.get(path);
+      expect(response.status).toBe(302);
+      expect(response.headers.get('location')).toStartWith('/login');
+    }
+  });
+
+  test('anonymous visitors cannot reach a full-resolution map by any route', async () => {
+    for (const variant of ['full', 'thumb', 'download']) {
+      const response = await anonymous.get(`/i/${mapUuid}/${variant}`);
+      expect(response.status).toBe(302);
+      // Critically: no image bytes in the body.
+      expect((await response.arrayBuffer()).byteLength).toBeLessThan(2048);
+      expect(response.headers.get('content-type')).not.toBe('image/webp');
+    }
+  });
+
+  test('viewers can read maps and images', async () => {
+    expect((await viewer.get('/maps')).status).toBe(200);
+    expect((await viewer.get(`/maps/${mapUuid}`)).status).toBe(200);
+
+    const image = await viewer.get(`/i/${mapUuid}/full`);
+    expect(image.status).toBe(200);
+    expect(image.headers.get('content-type')).toBe('image/webp');
+  });
+
+  test('viewers are refused every write route, not merely denied the buttons', async () => {
+    const token = await viewer.csrfToken();
+
+    expect((await viewer.get('/maps/new')).status).toBe(403);
+    expect((await viewer.get(`/maps/${mapUuid}/edit`)).status).toBe(403);
+    expect((await viewer.post(`/maps/${mapUuid}/delete`, new URLSearchParams({ _csrf: token }))).status).toBe(403);
+    expect((await viewer.post('/maps/new', uploadForm(token, png))).status).toBe(403);
+    expect(
+      (await viewer.post(`/maps/${mapUuid}/edit`, new URLSearchParams({ _csrf: token, name: 'Hijacked' }))).status,
+    ).toBe(403);
+  });
+
+  test('the viewer listing offers no upload affordance', async () => {
+    expect(await (await viewer.get('/maps')).text()).not.toContain('/maps/new');
+  });
+
+  test('admins can reach the write routes', async () => {
+    expect((await admin.get('/maps/new')).status).toBe(200);
+    expect((await admin.get(`/maps/${mapUuid}/edit`)).status).toBe(200);
+  });
+
+  test('a signed-out session cannot be replayed', async () => {
+    const client = await signedInAs('viewer');
+    expect((await client.get('/maps')).status).toBe(200);
+
+    await client.post('/logout', new URLSearchParams({ _csrf: await client.csrfToken() }));
+    expect((await client.get('/maps')).status).toBe(302);
+  });
+});
+
+describe('CSRF', () => {
+  test('a write without a token is refused', async () => {
+    const response = await admin.post(`/maps/${mapUuid}/edit`, new URLSearchParams({ name: 'No Token' }));
+    expect(response.status).toBe(403);
+  });
+
+  test('a write with the wrong token is refused', async () => {
+    const response = await admin.post(
+      `/maps/${mapUuid}/edit`,
+      new URLSearchParams({ _csrf: 'not-the-right-token', name: 'Bad Token' }),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  test('one session cannot use another session token', async () => {
+    const other = await signedInAs('admin');
+    const stolen = await other.csrfToken();
+
+    const response = await admin.post(
+      `/maps/${mapUuid}/edit`,
+      new URLSearchParams({ _csrf: stolen, name: 'Cross Session' }),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  test('a cross-origin write is refused before the token is even considered', async () => {
+    const response = await admin.post(
+      `/maps/${mapUuid}/edit`,
+      new URLSearchParams({ _csrf: await admin.csrfToken(), name: 'Evil' }),
+      { headers: { Origin: 'https://evil.example' } },
+    );
+    expect(response.status).toBe(403);
+  });
+
+  test('the login form itself is CSRF-protected while signed out', async () => {
+    const { email, password } = await makeUser('viewer');
+    const client = new Client();
+    await client.get('/login');
+
+    const withoutToken = await client.post('/login', new URLSearchParams({ email, password }));
+    expect(withoutToken.status).toBe(403);
+
+    // The same request with a valid token succeeds, proving the token is what
+    // was missing rather than the credentials.
+    const token = await client.csrfToken('/login');
+    const withToken = await client.post('/login', new URLSearchParams({ _csrf: token, email, password }));
+    expect(withToken.status).toBe(302);
+  });
+
+  test('safe methods are never blocked', async () => {
+    expect((await admin.get('/maps')).status).toBe(200);
+  });
+});
+
+describe('login', () => {
+  test('a wrong password is refused with a message that does not confirm the account', async () => {
+    const { email } = await makeUser('viewer');
+    const client = new Client();
+    const response = await client.post(
+      '/login',
+      new URLSearchParams({ _csrf: await client.csrfToken('/login'), email, password: 'wrong password entirely' }),
+    );
+
+    expect(response.status).toBe(401);
+    const html = await response.text();
+    expect(html).toContain('not correct');
+    // The same wording must be used for an unknown address.
+    const unknown = new Client();
+    const unknownResponse = await unknown.post(
+      '/login',
+      new URLSearchParams({
+        _csrf: await unknown.csrfToken('/login'),
+        email: 'nobody-at-all@example.test',
+        password: 'wrong password entirely',
+      }),
+    );
+    expect(await unknownResponse.text()).toContain('not correct');
+    expect(unknownResponse.status).toBe(401);
+  });
+});
+
+describe('search', () => {
+  const search = async (query: string): Promise<string> => (await admin.get(`/maps?${query}`)).text();
+  const matches = (html: string, name: string): boolean => html.includes(name);
+
+  test('finds a map by name, case-insensitively', async () => {
+    expect(matches(await search('q=fixture+river'), 'Fixture River Crossing')).toBe(true);
+    expect(matches(await search('q=FIXTURE+RIVER'), 'Fixture River Crossing')).toBe(true);
+  });
+
+  test('prefix-matches the final word', async () => {
+    expect(matches(await search('q=fixture+riv'), 'Fixture River Crossing')).toBe(true);
+  });
+
+  test('finds a map by tag, case-insensitively', async () => {
+    expect(matches(await search('tags=forest'), 'Fixture River Crossing')).toBe(true);
+    expect(matches(await search('tags=FOREST'), 'Fixture River Crossing')).toBe(true);
+  });
+
+  test('AND mode requires every tag; OR mode requires only one', async () => {
+    expect(matches(await search('tags=forest+road&mode=all'), 'Fixture River Crossing')).toBe(true);
+    expect(matches(await search('tags=forest+nonexistenttag&mode=all'), 'Fixture River Crossing')).toBe(false);
+    expect(matches(await search('tags=forest+nonexistenttag&mode=any'), 'Fixture River Crossing')).toBe(true);
+  });
+
+  test('FTS operators in user input are treated as text, not syntax', async () => {
+    for (const query of ['q=forest+OR+*', 'q=%22', 'q=NEAR%2F2', 'tags=*', 'q=%29%28', 'q=a%22+OR+%22b']) {
+      const response = await admin.get(`/maps?${query}`);
+      expect(response.status).toBe(200);
+    }
+  });
+
+  test('an unmatched search reports an empty state rather than an error', async () => {
+    const html = await search('q=definitelynosuchmapname');
+    expect(html).toContain('No maps match that search');
+  });
+});
+
+describe('map lifecycle', () => {
+  test('upload derives the square counts from the grid size', async () => {
+    const response = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), png, { name: 'Lifecycle Derivation', gridSize: '70' }),
+    );
+    const uuid = uuidFromRedirect(response);
+
+    const html = await (await admin.get(`/maps/${uuid}`)).text();
+    expect(html).toContain('70 px per square');
+    expect(html).toContain('Entered manually');
+  });
+
+  test('a map uploaded with no grid says so and offers to add one', async () => {
+    const response = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), png, { name: 'Lifecycle No Grid' }),
+    );
+    const html = await (await admin.get(`/maps/${uuidFromRedirect(response)}`)).text();
+    expect(html).toContain('No grid recorded');
+  });
+
+  test('editing can add a grid afterwards', async () => {
+    const created = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), png, { name: 'Lifecycle Edit Target' }),
+    );
+    const uuid = uuidFromRedirect(created);
+
+    await admin.post(
+      `/maps/${uuid}/edit`,
+      new URLSearchParams({
+        _csrf: await admin.csrfToken(),
+        name: 'Lifecycle Edit Target',
+        variant: '',
+        tags: 'cave',
+        gridSize: '70',
+        gridWidth: '',
+        gridHeight: '',
+      }),
+    );
+
+    const html = await (await admin.get(`/maps/${uuid}`)).text();
+    expect(html).toContain('70 px per square');
+    expect(html).toContain('cave');
+  });
+
+  test('a duplicate name and variant is refused with a helpful message', async () => {
+    const form = uploadForm(await admin.csrfToken(), png, { name: 'Fixture River Crossing', variant: 'day' });
+    const response = await admin.post('/maps/new', form);
+
+    expect(response.status).toBe(409);
+    expect(await response.text()).toContain('already has a');
+  });
+
+  test('the same name with a different variant is allowed and links as a sibling', async () => {
+    const response = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), png, { name: 'Fixture River Crossing', variant: 'night' }),
+    );
+    expect(response.status).toBe(302);
+
+    const html = await (await admin.get(`/maps/${mapUuid}`)).text();
+    expect(html).toContain('Other variants');
+    expect(html).toContain('night');
+  });
+
+  test('delete removes the map and its images', async () => {
+    const created = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), png, { name: 'Lifecycle Delete Target' }),
+    );
+    const uuid = uuidFromRedirect(created);
+
+    expect((await admin.get(`/i/${uuid}/full`)).status).toBe(200);
+
+    const deleted = await admin.post(`/maps/${uuid}/delete`, new URLSearchParams({ _csrf: await admin.csrfToken() }));
+    expect(deleted.status).toBe(302);
+
+    expect((await admin.get(`/maps/${uuid}`)).status).toBe(404);
+    expect((await admin.get(`/i/${uuid}/full`)).status).toBe(404);
+  });
+});
+
+describe('image delivery', () => {
+  test('sets a download filename and a length', async () => {
+    const response = await admin.get(`/i/${mapUuid}/download`);
+    expect(response.headers.get('content-disposition')).toContain('attachment');
+    expect(response.headers.get('content-disposition')).toContain('.webp');
+    expect(Number(response.headers.get('content-length'))).toBeGreaterThan(0);
+  });
+
+  test('marks authenticated images private so no shared cache retains them', async () => {
+    const response = await admin.get(`/i/${mapUuid}/full`);
+    expect(response.headers.get('cache-control')).toContain('private');
+  });
+
+  test('rejects a path that is not a UUID', async () => {
+    for (const bad of ['../../../etc/passwd', 'not-a-uuid', '00000000-0000-4000-8000-000000000000']) {
+      expect((await admin.get(`/i/${encodeURIComponent(bad)}/full`)).status).toBe(404);
+    }
+  });
+});
+
+describe('security headers', () => {
+  test('every response carries the hardening headers', async () => {
+    const response = await admin.get('/maps');
+
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(response.headers.get('x-frame-options')).toBe('DENY');
+    expect(response.headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin');
+
+    const csp = response.headers.get('content-security-policy') ?? '';
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    // The relaxations that would undo the policy must not be present.
+    expect(csp).not.toContain('unsafe-inline');
+    expect(csp).not.toContain('unsafe-eval');
+  });
+
+  test('the nonce in the policy is the one the page actually uses', async () => {
+    const response = await admin.get(`/maps/${mapUuid}`);
+    const html = await response.text();
+
+    const nonce = /'nonce-([^']+)'/.exec(response.headers.get('content-security-policy') ?? '')?.[1];
+    expect(nonce).toBeTruthy();
+    expect(html).toContain(`<style nonce="${nonce}">`);
+  });
+
+  test('a fresh nonce is issued per request', async () => {
+    const first = (await admin.get(`/maps/${mapUuid}`)).headers.get('content-security-policy');
+    const second = (await admin.get(`/maps/${mapUuid}`)).headers.get('content-security-policy');
+    expect(first).not.toBe(second);
+  });
+});
+
+describe('output escaping', () => {
+  test('a map name containing markup is rendered as text', async () => {
+    const hostile = 'XSS <script>alert(1)</script> & "quoted"';
+    const response = await admin.post('/maps/new', uploadForm(await admin.csrfToken(), png, { name: hostile }));
+
+    const html = await (await admin.get(`/maps/${uuidFromRedirect(response)}`)).text();
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
+});
+
+describe('error pages', () => {
+  test('an unknown path renders a friendly 404 with a reference id', async () => {
+    const response = await admin.get('/no/such/page');
+    expect(response.status).toBe(404);
+
+    const html = await response.text();
+    expect(html).toContain('Nothing here');
+    expect(html).toContain('quote reference');
+  });
+
+  test('an unknown map renders 404 rather than leaking whether it ever existed', async () => {
+    expect((await admin.get('/maps/11111111-1111-4111-8111-111111111111')).status).toBe(404);
+  });
+});
+
+describe('pagination', () => {
+  const PER_PAGE = 24;
+  const TAG = 'paginationfixture';
+
+  beforeAll(() => {
+    // Rows are inserted directly: pagination is about counting and slicing, and
+    // encoding 30 real images would only slow the suite down.
+    for (let i = 1; i <= 30; i++) {
+      createMap({
+        uuid: crypto.randomUUID(),
+        name: `Pagination Fixture ${String(i).padStart(2, '0')}`,
+        variant: '',
+        tags: [TAG],
+        gridSize: null,
+        gridWidth: null,
+        gridHeight: null,
+        gridSource: 'none',
+        upscaleFactor: 1,
+        imageWidth: 100,
+        imageHeight: 100,
+        fileSize: 1,
+        originalFilename: null,
+        uploadedBy: null,
+      });
+    }
+  });
+
+  const cardCount = (html: string): number => (html.match(/alt="Thumbnail of/g) ?? []).length;
+
+  test('fills the first page and puts the remainder on the second', async () => {
+    const first = await (await admin.get(`/maps?tags=${TAG}`)).text();
+    const second = await (await admin.get(`/maps?tags=${TAG}&page=2`)).text();
+
+    expect(cardCount(first)).toBe(PER_PAGE);
+    expect(cardCount(second)).toBe(30 - PER_PAGE);
+    expect(first).toContain('Page 1 of 2');
+  });
+
+  test('a page beyond the end clamps to the last page rather than erroring', async () => {
+    const response = await admin.get(`/maps?tags=${TAG}&page=999`);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('Page 2 of 2');
+  });
+
+  test('a nonsensical page parameter falls back to the first page', async () => {
+    for (const page of ['0', '-3', 'abc', '1e9']) {
+      const response = await admin.get(`/maps?tags=${TAG}&page=${page}`);
+      expect(response.status).toBe(200);
+    }
+  });
+
+  test('page links carry the current search with them', async () => {
+    const html = await (await admin.get(`/maps?tags=${TAG}`)).text();
+    expect(html).toContain(`/maps?tags=${TAG}&amp;page=2`);
+  });
+
+  test('sorting by name orders the results', async () => {
+    const html = await (await admin.get(`/maps?tags=${TAG}&sort=name`)).text();
+    const names = [...html.matchAll(/Pagination Fixture (\d+)/g)].map((m) => m[1]!);
+    expect(names.length).toBeGreaterThan(1);
+    expect([...names]).toEqual([...names].sort());
+  });
+});
+
+describe('theme', () => {
+  test('defaults to following the system, with no class pinned', async () => {
+    const html = await (await (new Client()).get('/login')).text();
+    expect(html).toContain('<html lang="en">');
+  });
+
+  test('a stored preference is rendered server-side, so there is no flash', async () => {
+    const client = new Client();
+    await client.get('/login');
+    await client.post('/theme', new URLSearchParams({ _csrf: await client.csrfToken('/login'), theme: 'dark' }));
+
+    expect(await (await client.get('/login')).text()).toContain('<html lang="en" class="dark">');
+  });
+});

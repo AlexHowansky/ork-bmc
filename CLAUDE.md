@@ -1,0 +1,64 @@
+# Battle Mapper — working notes
+
+A server-rendered map library for tabletop games. Read `README.md` for what the
+app does and `SPEC.md` for the requirements it was built against.
+
+## Runtime
+
+Bun, not Node. Use `bun <file>`, `bun test`, `bun install`, `bunx`.
+Bun loads `.env` automatically — do not add `dotenv`.
+
+Prefer built-ins over dependencies: `bun:sqlite` (not better-sqlite3),
+`Bun.password` (not bcrypt/argon2 packages), `Bun.file` / `Bun.write` (not
+`node:fs` read/write helpers). The only runtime dependencies are `hono` and
+`sharp`, and it is worth keeping it that way.
+
+## Commands
+
+```bash
+bun run dev         # rebuild CSS, then serve with watching
+bun test            # full suite
+bun run typecheck   # tsc --noEmit — run before calling anything done
+bun run css:build   # required after adding Tailwind classes
+bun run db:migrate
+```
+
+## Things that will bite you
+
+- **Tailwind classes are compiled from source.** After adding a class in a
+  `.tsx` file, run `bun run css:build` or it simply will not apply.
+- **Route order matters.** `adminRoutes` is mounted before `mapRoutes` in
+  `server.tsx` because `/maps/new` would otherwise be swallowed by
+  `/maps/:uuid`. Adding another literal `/maps/<word>` route needs the same care.
+- **Middleware order matters** and is documented at the top of `server.tsx`.
+  `attachSession` must run before anything that can throw, because the error
+  page is rendered from that same context.
+- **Do not use `c.header()` after a response is finalised.** Hono rebuilds the
+  response from its body stream, which drops `Content-Length`. `securityHeaders`
+  writes to `c.res.headers` directly for this reason.
+- **The CSP has no `unsafe-inline`.** No inline `<script>`, and no `style`
+  attributes. The single dynamic style (the grid overlay) uses a per-request
+  nonce; see `gridOverlayCss` in `views/Layout.tsx`.
+- **Adding a route makes it private by default.** Anything reachable while
+  signed out must be listed in `PUBLIC_PATHS` in `auth/middleware.ts`.
+
+## Conventions
+
+- Errors thrown to the user are `AppError` from `src/errors.ts`. `userMessage`
+  is rendered; the cause stays in the log. Never surface a raw exception.
+- Validation failures use `validationFailed({ field: message })` so the form can
+  re-render with the user's input intact.
+- Log through `src/log.ts`, never `console.*`. Secrets are redacted by field
+  name, but do not rely on that — avoid passing them in the first place.
+- SQL goes through prepared statements. Search terms are quoted for FTS5 by
+  `buildMatchExpression`; never interpolate user text into a MATCH expression.
+- Storage paths are derived only from a validated UUID v4. Do not add a code
+  path that builds a path from anything else.
+
+## Not implemented
+
+Automatic grid detection. `src/images/grid.ts` is a stub returning
+`{ source: 'none' }` behind the final interface; the upload path, schema
+columns, and UI states around it are complete. The module comment describes the
+intended algorithm, and `solveIntegerUpscale` — the capped upscale solver the
+detector will hand its result to — is written and tested.

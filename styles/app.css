@@ -1,0 +1,75 @@
+@import 'tailwindcss';
+
+/* Tell Tailwind where to look for classes; the CLI is run from the repo root. */
+@source '../src/**/*.{ts,tsx}';
+@source '../public/app.js';
+
+/*
+ * Three-state theming with no JavaScript required.
+ *
+ *   <html class="dark">   → always dark
+ *   <html class="light">  → always light
+ *   <html>                → follow the operating system
+ *
+ * The server renders the class from a cookie, so the very first paint is
+ * already correct and there is no flash of the wrong theme. The media-query
+ * branch is scoped to `:root:not(.light)` so an explicit light choice still
+ * wins on a machine set to dark.
+ */
+@custom-variant dark {
+  &:where(.dark, .dark *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not(.light), :root:not(.light) *) {
+      @slot;
+    }
+  }
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    /* Native form controls and scrollbars follow the chosen theme too. */
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    html:not(.light) {
+      color-scheme: dark;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@utility grid-overlay {
+  /*
+   * Draws a one-pixel rule at every grid line over a map image, so the recorded
+   * grid can be checked against the painted one at a glance.
+   *
+   * `background-size` is deliberately absent: it is supplied per map by the
+   * nonce'd <style> block the detail page emits (see `gridOverlayCss` in
+   * views/Layout.tsx), in percentages so the overlay stays aligned at whatever
+   * width the image is actually displayed.
+   */
+  background-image: linear-gradient(to right, var(--grid-overlay-color) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-overlay-color) 1px, transparent 1px);
+  background-position: 0 0;
+  background-repeat: repeat;
+}

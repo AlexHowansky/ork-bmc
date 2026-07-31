@@ -1,0 +1,5 @@
+[test]
+# Points the app at a throwaway database and image directory before any module
+# is imported — config.ts reads the environment at import time, so this has to
+# happen in a preload rather than inside a test file.
+preload = ["./tests/setup.ts"]
