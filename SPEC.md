@@ -107,6 +107,9 @@ the following features:
 
 * The upload form should accept drag-and-drop.
 
+* The filename for the map download should include the variant. If every image
+  is downloaded, each should have a unique name.
+
 ## Additional Rules
 
 Always obey the following rules:

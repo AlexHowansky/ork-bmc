@@ -632,9 +632,31 @@ describe('duplicate detection', () => {
 describe('image delivery', () => {
   test('sets a download filename and a length', async () => {
     const response = await admin.get(`/i/${mapUuid}/download`);
-    expect(response.headers.get('content-disposition')).toContain('attachment');
-    expect(response.headers.get('content-disposition')).toContain('.webp');
+    const disposition = response.headers.get('content-disposition');
+
+    expect(disposition).toContain('attachment');
+    // Name, then variant, then enough of the map's own identifier that no two
+    // maps can land on the same filename.
+    expect(disposition).toContain(`filename="fixture-river-crossing-day-${mapUuid.slice(0, 8)}.webp"`);
     expect(Number(response.headers.get('content-length'))).toBeGreaterThan(0);
+  });
+
+  test('two variants of one map download under different names', async () => {
+    const upload = async (variant: string): Promise<string> => {
+      const response = await admin.post(
+        '/maps/new',
+        uploadForm(await admin.csrfToken(), await makeMapPng(), { name: 'Download Naming', variant }),
+      );
+      expect(response.status).toBe(302);
+      return uuidFromRedirect(response);
+    };
+
+    const dawn = await admin.get(`/i/${await upload('dawn')}/download`);
+    const dusk = await admin.get(`/i/${await upload('dusk')}/download`);
+
+    expect(dawn.headers.get('content-disposition')).toContain('download-naming-dawn');
+    expect(dusk.headers.get('content-disposition')).toContain('download-naming-dusk');
+    expect(dawn.headers.get('content-disposition')).not.toBe(dusk.headers.get('content-disposition'));
   });
 
   test('marks authenticated images private so no shared cache retains them', async () => {

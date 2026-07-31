@@ -11,7 +11,7 @@ import { Hono, type Context } from 'hono';
 import { requireAdmin } from '../auth/middleware.ts';
 import { notFound } from '../errors.ts';
 import { imageFile, isValidUuid } from '../images/storage.ts';
-import { findMap } from '../models/maps.ts';
+import { findMap, type MapRecord } from '../models/maps.ts';
 import { findPendingUpload } from '../models/pendingUploads.ts';
 import type { AppEnv } from '../types.ts';
 
@@ -91,24 +91,40 @@ fileRoutes.get('/i/:uuid/download', async (c) => {
 
   c.get('logger').info('map downloaded', { uuid, name: map.name });
 
-  return serve(c, uuid, 'full', `attachment; filename="${downloadFilename(map.name, map.variant)}"`);
+  return serve(c, uuid, 'full', `attachment; filename="${downloadFilename(map)}"`);
 });
 
 /**
- * Builds a tidy download filename from the map's name.
+ * Builds a tidy download filename from the map's name, variant and UUID.
+ *
+ * Every downloaded file has to land in the same folder without one overwriting
+ * another, and neither the name nor the variant is enough on its own for that.
+ * The pair is unique in the database, but the slug is not: "River Crossing"
+ * with the variant "day" and a map plainly called "River Crossing Day" reduce to
+ * the same thing, as do two names differing only in punctuation, two names
+ * sharing their first 80 characters, and any two names with no ASCII letters in
+ * them at all. So the map's own identifier goes on the end and settles it.
+ *
+ * Eight hex digits rather than the whole UUID: enough that a clash needs two
+ * maps to agree on both the slug and the identifier, short enough to leave the
+ * readable part readable. It is taken from the stored UUID rather than generated,
+ * so downloading the same map twice gives the same filename and replaces the
+ * earlier copy instead of piling up "(1)" duplicates beside it.
  *
  * Reduced to a conservative character set: the value lands in a
  * Content-Disposition header, where quotes or newlines would let it break out
  * of the header it sits in.
  */
-export function downloadFilename(name: string, variant: string): string {
-  const base = [name, variant]
+export function downloadFilename(map: Pick<MapRecord, 'name' | 'variant' | 'uuid'>): string {
+  const base = [map.name, map.variant]
     .filter(Boolean)
     .join('-')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 80);
+    .slice(0, 80)
+    // Truncation can land on a separator, which would double up below.
+    .replace(/-+$/, '');
 
-  return `${base || 'battle-map'}.webp`;
+  return `${base || 'battle-map'}-${map.uuid.slice(0, 8)}.webp`;
 }
