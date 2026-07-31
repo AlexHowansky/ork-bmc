@@ -1,5 +1,5 @@
 /**
- * The drag-and-drop half of `public/app.js`.
+ * The handlers in `public/app.js`.
  *
  * There is no browser or DOM library here and it is not worth a dependency for
  * one script, so the handlers are driven against the smallest stub that satisfies
@@ -51,14 +51,20 @@ function dragEvent(files: { name: string; type: string }[], target: unknown = zo
 
 const png = { name: 'sunken_temple.png', type: 'image/png' };
 
+/** The checkbox that CSS uses to hold the full-size map view open. */
+const lightbox = { checked: false };
+
 beforeAll(async () => {
   const globals = globalThis as Record<string, unknown>;
   globals['document'] = {
     addEventListener: (type: string, handler: Handler) => {
       handlers[type] = handler;
     },
-    // Only consulted to decide whether a stray drop should be swallowed.
-    querySelector: () => zone,
+    querySelector: (selector: string) => {
+      if (selector.indexOf('data-lightbox-toggle') !== -1) return lightbox.checked ? lightbox : null;
+      // Otherwise: is there a drop zone on this page at all?
+      return zone;
+    },
   };
   globals['Event'] = class {
     constructor(public type: string) {}
@@ -149,5 +155,26 @@ describe('the upload drop zone', () => {
 
     expect(event.prevented).toBe(true);
     expect(fileInput.files).toBeNull();
+  });
+});
+
+describe('the full-size map view', () => {
+  test('closes on Escape', () => {
+    lightbox.checked = true;
+    handlers['keydown']!({ key: 'Escape' });
+
+    expect(lightbox.checked).toBe(false);
+  });
+
+  test('ignores any other key', () => {
+    lightbox.checked = true;
+    handlers['keydown']!({ key: 'Enter' });
+
+    expect(lightbox.checked).toBe(true);
+    lightbox.checked = false;
+  });
+
+  test('does not mind Escape when nothing is open', () => {
+    expect(() => handlers['keydown']!({ key: 'Escape' })).not.toThrow();
   });
 });

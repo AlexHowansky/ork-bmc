@@ -472,6 +472,27 @@ describe('map lifecycle', () => {
   });
 });
 
+describe('map detail', () => {
+  test('the map opens full size on click, with no script involved', async () => {
+    const html = await (await admin.get(`/maps/${mapUuid}`)).text();
+
+    // A checkbox and two labels for it: one around the image to open the view,
+    // one covering the screen to close it again.
+    expect(html).toContain('id="full-size"');
+    expect(html.match(/for="full-size"/g)).toHaveLength(2);
+    // Which is what makes it full size rather than a second fitted copy.
+    expect(html).toContain('max-w-none');
+
+    // The grid toggle is a second checkbox on the same page; both must survive.
+    expect(html).toContain('id="grid-toggle"');
+  });
+
+  test('the page freeze behind the full-size view survives the CSS build', async () => {
+    const css = await Bun.file('public/app.css').text();
+    expect(css).toContain('body:has([data-lightbox-toggle]:checked)');
+  });
+});
+
 describe('duplicate detection', () => {
   /** Uploads an image and returns the response, without asserting what it is. */
   const upload = (client: Client, image: Buffer, overrides: Record<string, string> = {}) =>

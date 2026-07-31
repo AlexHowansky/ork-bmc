@@ -110,6 +110,8 @@ the following features:
 * The filename for the map download should include the variant. If every image
   is downloaded, each should have a unique name.
 
+* On the map detail page, clicking on the map should show it full size.
+
 ## Additional Rules
 
 Always obey the following rules:

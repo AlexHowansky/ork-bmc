@@ -229,19 +229,56 @@ mapRoutes.get('/maps/:uuid', (c) => {
           )}
 
           <div class="relative overflow-hidden rounded-xl border border-stone-200 bg-stone-100 peer-checked:[&_.map-grid-overlay]:block dark:border-stone-800 dark:bg-stone-900">
-            <img
-              src={`/i/${map.uuid}/full`}
-              alt={map.name}
-              width={map.imageWidth}
-              height={map.imageHeight}
-              class="block h-auto w-full"
-            />
+            {/*
+              Full size on click, CSS-only like the grid toggle above. Both
+              labels drive the same checkbox: the one around the image opens the
+              view, the one behind it closes again. The checkbox sits inside this
+              container rather than beside the grid one, so the two sets of
+              `peer-checked:` rules are in different sibling groups and cannot
+              trip over each other.
+            */}
+            <input type="checkbox" id="full-size" class="peer sr-only" data-lightbox-toggle />
+
+            <label for="full-size" class="block cursor-zoom-in" title="Show full size">
+              <img
+                src={`/i/${map.uuid}/full`}
+                alt={map.name}
+                width={map.imageWidth}
+                height={map.imageHeight}
+                class="block h-auto w-full"
+              />
+              <span class="sr-only"> — show full size</span>
+            </label>
+
             {hasGrid && (
               <div
                 aria-hidden="true"
                 class="map-grid-overlay grid-overlay pointer-events-none absolute inset-0 hidden [--grid-overlay-color:rgba(220,38,38,0.6)]"
               />
             )}
+
+            {/*
+              `max-w-none` defeats the base stylesheet's `max-width: 100%`, which
+              is the whole point: the image is shown at its stored pixel size and
+              the overlay scrolls. Centred with `mx-auto` rather than flex, so an
+              image wider than the viewport is not clipped on its left edge.
+            */}
+            <label
+              for="full-size"
+              class="fixed inset-0 z-50 hidden cursor-zoom-out overflow-auto bg-stone-950/90 p-4 peer-checked:block"
+            >
+              <img
+                src={`/i/${map.uuid}/full`}
+                alt=""
+                width={map.imageWidth}
+                height={map.imageHeight}
+                // Same URL as the image above, so opening the view costs a cache
+                // hit rather than a second download — but not decoded until then.
+                loading="lazy"
+                class="mx-auto max-w-none"
+              />
+              <span class="sr-only">Close the full-size view</span>
+            </label>
           </div>
         </div>
 

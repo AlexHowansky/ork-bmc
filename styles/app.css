@@ -44,6 +44,16 @@
     }
   }
 
+  /*
+   * Hold the page still behind an open full-size map view. The overlay is
+   * fixed and scrolls internally, so without this the page underneath scrolls
+   * with it. Driven off the checkbox that opens the view, since there is no
+   * JavaScript involved in opening it.
+   */
+  body:has([data-lightbox-toggle]:checked) {
+    overflow: hidden;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     html {
       scroll-behavior: auto;

@@ -9,6 +9,8 @@
  *     from a blank field, so this only makes it visible sooner.
  *   - The upload box accepts a dragged file, handing it to the ordinary file
  *     input so the form still posts in exactly the same way.
+ *   - Escape closes the full-size map view, which otherwise opens and closes
+ *     entirely in CSS.
  *
  * Loaded from same-origin so the strict `script-src 'self'` CSP allows it.
  */
@@ -70,6 +72,16 @@
 
     field.value = nameFromFilename(file.name);
     field.setAttribute('data-autofilled', field.value);
+  });
+
+  // The full-size map view is a checkbox and a label, so clicking closes it and
+  // so does Space on the focused control. Escape is the one thing CSS cannot
+  // offer, and it is what people reach for over a full-screen overlay.
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape') return;
+
+    var open = document.querySelector('[data-lightbox-toggle]:checked');
+    if (open) open.checked = false;
   });
 
   // -------------------------------------------------------------------------
