@@ -163,13 +163,8 @@ mapRoutes.get('/maps/:uuid', (c) => {
       ...(hasGrid ? { gridOverlay: { columns: map.gridWidth!, rows: map.gridHeight! } } : {}),
     },
     <div>
-      <nav class="text-sm">
-        <a href="/maps" class={link}>
-          ← Back to maps
-        </a>
-      </nav>
-
-      <div class="mt-4 flex flex-wrap items-start justify-between gap-4">
+      {/* No back link: the nav bar carries the way back to the listing. */}
+      <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 class="text-2xl font-bold tracking-tight">
             {map.name}
