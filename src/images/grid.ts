@@ -26,6 +26,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import { config } from '../config.ts';
+import { validationFailed } from '../errors.ts';
 
 /** How the stored grid values were arrived at. */
 export type GridSource = 'none' | 'user' | 'detected' | 'estimated';
@@ -111,12 +112,130 @@ export interface GridInput {
   gridHeight?: number | undefined;
 }
 
+/** Dimensions an image must have for its recorded grid to land on whole pixels. */
+export interface TargetSize {
+  width: number;
+  height: number;
+}
+
+export interface GridFit extends GridGeometry {
+  /** What the image must be resized to; null when it already fits. */
+  target: TargetSize | null;
+  /** Scale of `target` against the image it was measured from; 1 when there is no target. */
+  upscaleFactor: number;
+  /** True when the caps blocked the upscale and the grid size was rounded instead. */
+  capped: boolean;
+}
+
+/**
+ * The most the two axes may disagree about the size of a square before the
+ * counts are rejected as describing a grid that is not square.
+ *
+ * A little slack is needed because a whole number of squares rarely divides a
+ * photographed map exactly, and because only one of the two counts may have been
+ * measured carefully. Beyond it the two numbers are describing different grids,
+ * and the honest answer is to say so rather than to stretch the map.
+ */
+const SIZE_AGREEMENT_PX = 1;
+const SIZE_AGREEMENT_RATIO = 0.01;
+
+const roundTo = (value: number, places: number): number => {
+  const scale = 10 ** places;
+  return Math.round(value * scale) / scale;
+};
+
+/**
+ * Works out the grid an admin described by counting squares, and the image size
+ * that would make it exact.
+ *
+ * Typing "30 squares across" on a 1000px map is a statement that each square is
+ * 33.33px, which no image can represent. Rounding to 33 leaves the recorded grid
+ * describing something the file is not — the overlay drifts a pixel per column.
+ * Instead the square size is taken up to the next whole number and the image is
+ * enlarged to suit: 34px squares, 30 of them, so 1020px across.
+ *
+ * Throws a field error when the two counts disagree about how big a square is,
+ * because the only way to satisfy both would be to stretch one axis.
+ */
+export function fitGridToCounts(
+  counts: { gridWidth?: number | undefined; gridHeight?: number | undefined },
+  image: { width: number; height: number },
+  options: { maxUpscale?: number; maxPixels?: number } = {},
+): GridFit {
+  const { gridWidth, gridHeight } = counts;
+
+  const sizeFromWidth = gridWidth !== undefined ? image.width / gridWidth : undefined;
+  const sizeFromHeight = gridHeight !== undefined ? image.height / gridHeight : undefined;
+
+  if (sizeFromWidth === undefined && sizeFromHeight === undefined) {
+    throw new Error('fitGridToCounts needs at least one of gridWidth or gridHeight');
+  }
+
+  if (sizeFromWidth !== undefined && sizeFromHeight !== undefined) {
+    const larger = Math.max(sizeFromWidth, sizeFromHeight);
+    const tolerance = Math.max(SIZE_AGREEMENT_PX, larger * SIZE_AGREEMENT_RATIO);
+
+    if (Math.abs(sizeFromWidth - sizeFromHeight) > tolerance) {
+      const message =
+        `${gridWidth} squares across a ${image.width}px image is ${roundTo(sizeFromWidth, 1)}px per square, ` +
+        `but ${gridHeight} down a ${image.height}px image is ${roundTo(sizeFromHeight, 1)}px. ` +
+        `Squares are square, so please check these two values.`;
+      throw validationFailed({ gridWidth: message, gridHeight: message });
+    }
+  }
+
+  // Take the larger implied size so that neither axis has to be shrunk to fit.
+  const measured = Math.max(sizeFromWidth ?? 0, sizeFromHeight ?? 0);
+  const solved = solveIntegerUpscale(measured, image.width, image.height, options);
+  const gridSize = solved.gridSize;
+
+  // The counts the admin gave are kept as typed; anything missing follows from
+  // the square size, exactly as it does when a size is entered directly.
+  const width = gridWidth ?? Math.max(1, Math.round((image.width * solved.factor) / gridSize));
+  const height = gridHeight ?? Math.max(1, Math.round((image.height * solved.factor) / gridSize));
+
+  if (solved.estimated) {
+    // The caps refused the enlargement, so the size is rounded instead and the
+    // file is left as it is.
+    return { gridSize, gridWidth: width, gridHeight: height, target: null, upscaleFactor: 1, capped: true };
+  }
+
+  // An axis the admin counted lands on an exact multiple of the square size.
+  // The other one is only scaled, because snapping a count that was derived by
+  // rounding could stretch the map by half a square. Neither can come out
+  // smaller: the square size is at least what each axis implied.
+  const target: TargetSize = {
+    width: gridWidth !== undefined ? gridWidth * gridSize : Math.round(image.width * solved.factor),
+    height: gridHeight !== undefined ? gridHeight * gridSize : Math.round(image.height * solved.factor),
+  };
+
+  // The square size can already be whole while one axis still does not divide
+  // by it — 1920×1080 counted as 27×15 gives 72px squares, but only 26.67 of
+  // them across — so the dimensions decide this, not the factor.
+  if (target.width === image.width && target.height === image.height) {
+    return { gridSize, gridWidth: width, gridHeight: height, target: null, upscaleFactor: 1, capped: false };
+  }
+
+  return {
+    gridSize,
+    gridWidth: width,
+    gridHeight: height,
+    target,
+    upscaleFactor: target.width / image.width,
+    capped: false,
+  };
+}
+
 export interface ResolvedGrid {
   gridSize: number | null;
   gridWidth: number | null;
   gridHeight: number | null;
   source: GridSource;
   upscaleFactor: number;
+  /** Set when the image must be resized for the grid above to be exact. */
+  target: TargetSize | null;
+  /** True when an enlargement was called for but the caps refused it. */
+  capped: boolean;
 }
 
 /**
@@ -126,7 +245,9 @@ export interface ResolvedGrid {
  * Anything the admin supplied is authoritative and is never second-guessed.
  * Missing values are filled by arithmetic where the supplied ones allow it,
  * because a grid size and an image width already determine the column count.
- * Detection is consulted only when there is nothing to derive from.
+ * A square count goes through `fitGridToCounts`, which can ask for the image to
+ * be enlarged so the count divides it exactly. Detection is consulted only when
+ * there is nothing to derive from.
  */
 export function resolveGrid(input: GridInput, image: { width: number; height: number }, raw?: RawImage): ResolvedGrid {
   const { gridSize, gridWidth, gridHeight } = input;
@@ -138,21 +259,22 @@ export function resolveGrid(input: GridInput, image: { width: number; height: nu
       gridHeight: gridHeight ?? Math.max(1, Math.round(image.height / gridSize)),
       source: 'user',
       upscaleFactor: 1,
+      target: null,
+      capped: false,
     };
   }
 
   if (gridWidth !== undefined || gridHeight !== undefined) {
-    // A square count on either axis implies the pixel size of a square.
-    const derivedSize =
-      gridWidth !== undefined ? image.width / gridWidth : image.height / gridHeight!;
-    const size = Math.max(1, Math.round(derivedSize));
+    const fit = fitGridToCounts({ gridWidth, gridHeight }, image);
 
     return {
-      gridSize: size,
-      gridWidth: gridWidth ?? Math.max(1, Math.round(image.width / size)),
-      gridHeight: gridHeight ?? Math.max(1, Math.round(image.height / size)),
+      gridSize: fit.gridSize,
+      gridWidth: fit.gridWidth,
+      gridHeight: fit.gridHeight,
       source: 'user',
-      upscaleFactor: 1,
+      upscaleFactor: fit.upscaleFactor,
+      target: fit.target,
+      capped: fit.capped,
     };
   }
 
@@ -160,7 +282,15 @@ export function resolveGrid(input: GridInput, image: { width: number; height: nu
   const detected = raw ? detectGrid(raw) : ({ source: 'none' } as const);
 
   if (detected.source === 'none') {
-    return { gridSize: null, gridWidth: null, gridHeight: null, source: 'none', upscaleFactor: 1 };
+    return {
+      gridSize: null,
+      gridWidth: null,
+      gridHeight: null,
+      source: 'none',
+      upscaleFactor: 1,
+      target: null,
+      capped: false,
+    };
   }
 
   return {
@@ -169,5 +299,13 @@ export function resolveGrid(input: GridInput, image: { width: number; height: nu
     gridHeight: detected.gridHeight,
     source: detected.source,
     upscaleFactor: detected.upscaleFactor,
+    target:
+      detected.upscaleFactor > 1
+        ? {
+            width: Math.round(image.width * detected.upscaleFactor),
+            height: Math.round(image.height * detected.upscaleFactor),
+          }
+        : null,
+    capped: false,
   };
 }

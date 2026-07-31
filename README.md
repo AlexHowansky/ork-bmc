@@ -82,6 +82,16 @@ three and the others are worked out for you — enter a grid size of 70 on a
 1400×980 map and it records 20×14 squares. On the map's page, *Show grid
 overlay* draws the recorded grid over the image so you can check it lines up.
 
+Square counts rarely divide an image evenly: 30 squares across a 1000px map
+works out at 33.33px each, which no file can represent. Rather than round it and
+leave the recorded grid describing something the image is not, the image is
+enlarged the smallest amount that makes the square size whole — here to 1020px,
+with 34px squares. This happens on upload and again on an edit that changes
+either square count, and `upscale factor` on the map's page reports the total
+enlargement since upload. Counts that disagree about how big a square is are
+rejected rather than stretched, and an enlargement beyond `GRID_MAX_UPSCALE` or
+`MAX_IMAGE_PIXELS` is declined, leaving the grid size rounded as before.
+
 > Automatic grid detection is specified but **not yet implemented**. Maps
 > uploaded with the grid fields blank are saved with no grid recorded, and can
 > be edited later to add one. See `src/images/grid.ts`.

@@ -61,4 +61,6 @@ Automatic grid detection. `src/images/grid.ts` is a stub returning
 `{ source: 'none' }` behind the final interface; the upload path, schema
 columns, and UI states around it are complete. The module comment describes the
 intended algorithm, and `solveIntegerUpscale` — the capped upscale solver the
-detector will hand its result to — is written and tested.
+detector will hand its result to — is written, tested, and already in use: it is
+what `fitGridToCounts` calls when an admin's square counts do not divide the
+image evenly, on upload and on an edit that changes them.

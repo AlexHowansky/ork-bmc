@@ -104,7 +104,10 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
               <p>
                 {existing.imageWidth} × {existing.imageHeight} pixels
               </p>
-              <p class="mt-1">The image itself cannot be changed. Delete this map and upload again to replace it.</p>
+              <p class="mt-1">
+                This image cannot be swapped for a different one — delete the map and upload again for that. Changing
+                the square counts below may enlarge it slightly.
+              </p>
             </div>
           </div>
         )
@@ -149,7 +152,9 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
       <h2 class="text-lg font-semibold">Grid</h2>
       <p class="mt-1 text-sm text-stone-600 dark:text-stone-400">
         If the map has a painted grid, record its geometry here. Enter the grid size and the number of squares is
-        worked out for you, or enter a square count and the size is derived.
+        worked out for you, or enter a square count and the size is derived. A square count that does not divide the
+        image evenly enlarges it just enough that it does — 30 squares across a 1000px map gives 34px squares and a
+        1020px image.
       </p>
 
       <div class="mt-4 grid gap-5 sm:grid-cols-3">

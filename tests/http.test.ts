@@ -3,8 +3,9 @@
  * search, and the guarantee that full-resolution maps need authentication.
  */
 import { beforeAll, describe, expect, test } from 'bun:test';
+import sharp from 'sharp';
 
-import { createMap } from '../src/models/maps.ts';
+import { createMap, findMap } from '../src/models/maps.ts';
 import { Client, ensureSchema, makeMapPng, makeUser, signedInAs, uploadForm, uuidFromRedirect } from './helpers.ts';
 
 let admin: Client;
@@ -255,6 +256,117 @@ describe('map lifecycle', () => {
     const html = await (await admin.get(`/maps/${uuid}`)).text();
     expect(html).toContain('70 px per square');
     expect(html).toContain('cave');
+  });
+
+  test('square counts that do not divide the image enlarge it on upload', async () => {
+    const square = await makeMapPng(1000, 1000, 100);
+    const response = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), square, {
+        name: 'Lifecycle Upscale',
+        gridWidth: '30',
+        gridHeight: '30',
+      }),
+    );
+    const uuid = uuidFromRedirect(response);
+
+    const map = findMap(uuid)!;
+    expect(map).toMatchObject({ gridSize: 34, gridWidth: 30, gridHeight: 30, imageWidth: 1020, imageHeight: 1020 });
+    expect(map.upscaleFactor).toBeCloseTo(1.02, 6);
+
+    const stored = await sharp(await (await admin.get(`/i/${uuid}/full`)).arrayBuffer()).metadata();
+    expect(stored.width).toBe(1020);
+  });
+
+  test('changing the square counts on an edit re-scales the stored image', async () => {
+    const square = await makeMapPng(1000, 1000, 100);
+    const created = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), square, {
+        name: 'Lifecycle Upscale Edit',
+        gridWidth: '30',
+        gridHeight: '30',
+      }),
+    );
+    const uuid = uuidFromRedirect(created);
+    const afterUpload = findMap(uuid)!;
+    expect(afterUpload.imageWidth).toBe(1020);
+
+    // The form posts back every field, including the grid size the upload
+    // recorded — the changed counts must win over it.
+    await admin.post(
+      `/maps/${uuid}/edit`,
+      new URLSearchParams({
+        _csrf: await admin.csrfToken(),
+        name: 'Lifecycle Upscale Edit',
+        variant: '',
+        tags: '',
+        gridSize: '34',
+        gridWidth: '25',
+        gridHeight: '25',
+      }),
+    );
+
+    const edited = findMap(uuid)!;
+    expect(edited).toMatchObject({ gridSize: 41, gridWidth: 25, gridHeight: 25, imageWidth: 1025, imageHeight: 1025 });
+    // Cumulative against the original 1000px upload, not the 1020px file.
+    expect(edited.upscaleFactor).toBeCloseTo((1020 / 1000) * (1025 / 1020), 6);
+    expect(edited.fileSize).not.toBe(afterUpload.fileSize);
+
+    const stored = await sharp(await (await admin.get(`/i/${uuid}/full`)).arrayBuffer()).metadata();
+    expect(stored.width).toBe(1025);
+    expect(stored.height).toBe(1025);
+  });
+
+  test('an edit that leaves the grid alone does not touch the image', async () => {
+    const square = await makeMapPng(1000, 1000, 100);
+    const created = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), square, { name: 'Lifecycle Untouched', gridWidth: '30', gridHeight: '30' }),
+    );
+    const uuid = uuidFromRedirect(created);
+    const before = findMap(uuid)!;
+
+    await admin.post(
+      `/maps/${uuid}/edit`,
+      new URLSearchParams({
+        _csrf: await admin.csrfToken(),
+        name: 'Lifecycle Untouched Renamed',
+        variant: '',
+        tags: 'cave',
+        gridSize: String(before.gridSize),
+        gridWidth: String(before.gridWidth),
+        gridHeight: String(before.gridHeight),
+      }),
+    );
+
+    const after = findMap(uuid)!;
+    expect(after.name).toBe('Lifecycle Untouched Renamed');
+    expect(after).toMatchObject({
+      gridSize: before.gridSize,
+      imageWidth: before.imageWidth,
+      imageHeight: before.imageHeight,
+      fileSize: before.fileSize,
+      upscaleFactor: before.upscaleFactor,
+    });
+  });
+
+  test('square counts that disagree about the square size are rejected', async () => {
+    const wide = await makeMapPng(1000, 800, 100);
+    const response = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), wide, {
+        name: 'Lifecycle Disagreement',
+        gridWidth: '30',
+        gridHeight: '30',
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    const html = await response.text();
+    expect(html).toContain('Squares are square');
+    // The form comes back with the values intact rather than a blank slate.
+    expect(html).toContain('Lifecycle Disagreement');
   });
 
   test('a duplicate name and variant is refused with a helpful message', async () => {

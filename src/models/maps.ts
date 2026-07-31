@@ -5,7 +5,7 @@
  * by triggers. Searches read the index and join back for the full row.
  */
 import { db } from '../db/index.ts';
-import { conflict, validationFailed } from '../errors.ts';
+import { conflict, notFound, validationFailed } from '../errors.ts';
 import type { GridSource } from '../images/grid.ts';
 
 export interface MapRecord {
@@ -273,6 +273,13 @@ export interface MapInput {
   upscaleFactor: number;
 }
 
+/** The measurements of a freshly re-encoded file, when an edit replaced one. */
+export interface UpdatedImage {
+  imageWidth: number;
+  imageHeight: number;
+  fileSize: number;
+}
+
 export interface CreateMapInput extends MapInput {
   uuid: string;
   imageWidth: number;
@@ -332,13 +339,25 @@ export function createMap(input: CreateMapInput): MapRecord {
   return findMap(input.uuid)!;
 }
 
-export function updateMap(uuid: string, input: MapInput): MapRecord {
+/**
+ * Rewrites a map's metadata.
+ *
+ * `image` is supplied only when the edit resized the stored file — changing the
+ * square counts can call for an enlargement — and the existing dimensions are
+ * kept untouched otherwise.
+ */
+export function updateMap(uuid: string, input: MapInput, image?: UpdatedImage): MapRecord {
+  const current = findMap(uuid);
+  if (!current) throw notFound('That map does not exist.');
+
   try {
     db.query(
       `UPDATE maps
           SET name = $name, variant = $variant, tags = $tags,
               grid_size = $gridSize, grid_width = $gridWidth, grid_height = $gridHeight,
-              grid_source = $gridSource, updated_at = $updatedAt
+              grid_source = $gridSource, upscale_factor = $upscaleFactor,
+              image_width = $imageWidth, image_height = $imageHeight, file_size = $fileSize,
+              updated_at = $updatedAt
         WHERE uuid = $uuid`,
     ).run({
       $uuid: uuid,
@@ -349,6 +368,10 @@ export function updateMap(uuid: string, input: MapInput): MapRecord {
       $gridWidth: input.gridWidth,
       $gridHeight: input.gridHeight,
       $gridSource: input.gridSource,
+      $upscaleFactor: input.upscaleFactor,
+      $imageWidth: image?.imageWidth ?? current.imageWidth,
+      $imageHeight: image?.imageHeight ?? current.imageHeight,
+      $fileSize: image?.fileSize ?? current.fileSize,
       $updatedAt: Date.now(),
     });
   } catch (error) {

@@ -10,8 +10,15 @@ import sharp from 'sharp';
 import { config } from '../config.ts';
 import { badRequest, payloadTooLarge } from '../errors.ts';
 import { log } from '../log.ts';
-import { resolveGrid, solveIntegerUpscale, type GridInput, type ResolvedGrid } from './grid.ts';
-import { storeImage } from './storage.ts';
+import {
+  fitGridToCounts,
+  resolveGrid,
+  solveIntegerUpscale,
+  type GridInput,
+  type ResolvedGrid,
+  type TargetSize,
+} from './grid.ts';
+import { imageFile, storeImage } from './storage.ts';
 
 export const ACCEPTED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 export const ACCEPTED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp'] as const;
@@ -103,19 +110,13 @@ export async function processUpload(bytes: Uint8Array, options: ProcessOptions):
 
   const uuid = options.uuid ?? crypto.randomUUID();
 
-  // Decide the grid before encoding, because a detected fractional grid can
-  // call for an upscale that changes the dimensions written to disk.
+  // Decide the grid before encoding, because a fractional grid size — whether
+  // counted by the admin or detected — calls for an upscale that changes the
+  // dimensions written to disk.
   const grid = resolveGrid(options.grid, { width: sourceWidth, height: sourceHeight });
 
-  let outputWidth = sourceWidth;
-  let outputHeight = sourceHeight;
-  let upscaleFactor = 1;
-
-  if (grid.upscaleFactor > 1) {
-    upscaleFactor = grid.upscaleFactor;
-    outputWidth = Math.round(sourceWidth * upscaleFactor);
-    outputHeight = Math.round(sourceHeight * upscaleFactor);
-  }
+  const outputWidth = grid.target?.width ?? sourceWidth;
+  const outputHeight = grid.target?.height ?? sourceHeight;
 
   assertWebpEncodable(outputWidth, outputHeight);
 
@@ -124,23 +125,12 @@ export async function processUpload(bytes: Uint8Array, options: ProcessOptions):
   // other metadata block, including anything malicious hidden in one.
   let output = sharp(bytes, { limitInputPixels: config.maxImagePixels }).rotate();
 
-  if (upscaleFactor > 1) {
+  if (grid.target) {
     output = output.resize({ width: outputWidth, height: outputHeight, kernel: 'lanczos3', fit: 'fill' });
   }
 
   const full = await output.webp({ lossless: true, effort: 4 }).toBuffer();
-
-  const thumb = await sharp(full, { limitInputPixels: config.maxImagePixels })
-    .resize({
-      width: config.thumbSize,
-      height: config.thumbSize,
-      fit: 'inside',
-      // Never enlarge a small map just to fill the thumbnail box.
-      withoutEnlargement: true,
-      kernel: 'lanczos3',
-    })
-    .webp({ quality: config.thumbQuality })
-    .toBuffer();
+  const thumb = await makeThumbnail(full);
 
   await storeImage(uuid, full, thumb);
 
@@ -157,11 +147,74 @@ export async function processUpload(bytes: Uint8Array, options: ProcessOptions):
     storedBytes: full.length,
     imageWidth,
     imageHeight,
-    upscaleFactor,
+    upscaleFactor: grid.upscaleFactor,
     gridSource: grid.source,
   });
 
   return { uuid, imageWidth, imageHeight, fileSize: full.length, grid };
+}
+
+export interface RescaledImage {
+  full: Uint8Array;
+  thumb: Uint8Array;
+  imageWidth: number;
+  imageHeight: number;
+  fileSize: number;
+}
+
+/**
+ * Re-encodes an already-stored map at a new size, for when an edit changes the
+ * square counts and the grid no longer divides the image exactly.
+ *
+ * Nothing is written: the buffers come back so the caller can commit the row
+ * first and only overwrite the files once that has succeeded. There is no
+ * pristine original to work from, so repeated edits resample the previous
+ * output — see `upscale_factor`, which the caller accumulates.
+ */
+export async function rescaleStored(uuid: string, target: TargetSize): Promise<RescaledImage> {
+  assertWebpEncodable(target.width, target.height);
+
+  const source = await imageFile(uuid, 'full').bytes();
+
+  // No `.rotate()`: the stored file was normalised when it was uploaded and
+  // carries no EXIF orientation of its own.
+  const full = await sharp(source, { limitInputPixels: config.maxImagePixels })
+    .resize({ width: target.width, height: target.height, kernel: 'lanczos3', fit: 'fill' })
+    .webp({ lossless: true, effort: 4 })
+    .toBuffer();
+
+  const thumb = await makeThumbnail(full);
+  const meta = await sharp(full).metadata();
+
+  log.info('image rescaled', {
+    uuid,
+    imageWidth: meta.width ?? target.width,
+    imageHeight: meta.height ?? target.height,
+    storedBytes: full.length,
+  });
+
+  return {
+    full,
+    thumb,
+    imageWidth: meta.width ?? target.width,
+    imageHeight: meta.height ?? target.height,
+    fileSize: full.length,
+  };
+}
+
+/** Lossy by design — a lossless preview would be pointlessly large. */
+function makeThumbnail(full: Uint8Array): Promise<Buffer> {
+  return sharp(full, { limitInputPixels: config.maxImagePixels })
+    .resize({
+      width: config.thumbSize,
+      height: config.thumbSize,
+      fit: 'inside',
+      // Never enlarge a small map just to fill the thumbnail box.
+      withoutEnlargement: true,
+      kernel: 'lanczos3',
+    })
+    .webp({ quality: config.thumbQuality })
+    .toBuffer();
 }
 
 function assertWebpEncodable(width: number, height: number): void {
@@ -177,4 +230,4 @@ function formatMb(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export { solveIntegerUpscale };
+export { fitGridToCounts, solveIntegerUpscale };

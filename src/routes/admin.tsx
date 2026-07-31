@@ -9,9 +9,9 @@ import { Hono, type Context } from 'hono';
 
 import { requireAdmin } from '../auth/middleware.ts';
 import { badRequest, notFound, validationFailed } from '../errors.ts';
-import { processUpload } from '../images/process.ts';
-import { resolveGrid } from '../images/grid.ts';
-import { deleteImage } from '../images/storage.ts';
+import { processUpload, rescaleStored } from '../images/process.ts';
+import { resolveGrid, type GridInput, type ResolvedGrid } from '../images/grid.ts';
+import { deleteImage, storeImage } from '../images/storage.ts';
 import {
   assertTagsAcceptable,
   createMap,
@@ -124,6 +124,46 @@ function parseMapForm(body: Record<string, unknown>): { values: MapFormValues; p
   return { values, parsed: { name: values.name, variant: values.variant, tags, gridSize, gridWidth, gridHeight } };
 }
 
+/**
+ * Decides which of the three grid fields the admin actually meant.
+ *
+ * The edit form arrives pre-filled with all three, so a submission that changes
+ * only the square counts still carries the old grid size, and the two disagree
+ * by construction. Whichever the admin touched wins, and the rest are dropped so
+ * they are re-derived: changing the counts is a request to re-fit the image to
+ * them, changing the size is a request to recount the squares.
+ *
+ * On upload there is nothing to compare against, so anything supplied counts as
+ * a change and the counts still take precedence.
+ */
+function chooseGridInput(parsed: ParsedForm, previous?: MapRecord): GridInput {
+  const same = (value: number | undefined, stored: number | null | undefined): boolean =>
+    (value ?? null) === (stored ?? null);
+
+  const countsChanged =
+    !same(parsed.gridWidth, previous?.gridWidth) || !same(parsed.gridHeight, previous?.gridHeight);
+  if (countsChanged && (parsed.gridWidth !== undefined || parsed.gridHeight !== undefined)) {
+    return { gridWidth: parsed.gridWidth, gridHeight: parsed.gridHeight };
+  }
+
+  if (!same(parsed.gridSize, previous?.gridSize) && parsed.gridSize !== undefined) {
+    return { gridSize: parsed.gridSize };
+  }
+
+  return { gridSize: parsed.gridSize, gridWidth: parsed.gridWidth, gridHeight: parsed.gridHeight };
+}
+
+/** Explains a resize, or the refusal to do one, in the success flash. */
+function gridNote(grid: ResolvedGrid, width: number, height: number): string {
+  if (grid.target) {
+    return ` It was enlarged to ${width}×${height} so its ${grid.gridWidth}×${grid.gridHeight} squares land on whole pixels.`;
+  }
+  if (grid.capped) {
+    return ` The image would have had to grow too much for those squares to divide it exactly, so the grid size was rounded to ${grid.gridSize}px.`;
+  }
+  return '';
+}
+
 // ---------------------------------------------------------------------------
 // Upload
 // ---------------------------------------------------------------------------
@@ -162,9 +202,7 @@ adminRoutes.post('/maps/new', async (c) => {
     }
 
     const bytes = new Uint8Array(await file.arrayBuffer());
-    const processed = await processUpload(bytes, {
-      grid: { gridSize: parsed.gridSize, gridWidth: parsed.gridWidth, gridHeight: parsed.gridHeight },
-    });
+    const processed = await processUpload(bytes, { grid: chooseGridInput(parsed) });
 
     try {
       const map = createMap({
@@ -190,7 +228,7 @@ adminRoutes.post('/maps/new', async (c) => {
         message:
           processed.grid.source === 'none'
             ? `“${map.name}” was uploaded. No grid was recorded — edit the map to add one.`
-            : `“${map.name}” was uploaded.`,
+            : `“${map.name}” was uploaded.` + gridNote(processed.grid, map.imageWidth, map.imageHeight),
       });
 
       return c.redirect(`/maps/${map.uuid}`, 302);
@@ -253,25 +291,47 @@ adminRoutes.post('/maps/:uuid/edit', async (c) => {
     const { parsed } = parsedForm;
 
     // Re-derive so that filling in just a grid size still yields the square
-    // counts, exactly as it does on upload.
-    const grid = resolveGrid(
-      { gridSize: parsed.gridSize, gridWidth: parsed.gridWidth, gridHeight: parsed.gridHeight },
-      { width: map.imageWidth, height: map.imageHeight },
-    );
-
-    const updated = updateMap(map.uuid, {
-      name: parsed.name,
-      variant: parsed.variant,
-      tags: parsed.tags,
-      gridSize: grid.gridSize,
-      gridWidth: grid.gridWidth,
-      gridHeight: grid.gridHeight,
-      gridSource: grid.source,
-      upscaleFactor: map.upscaleFactor,
+    // counts, exactly as it does on upload. Changed square counts can also call
+    // for the image itself to be enlarged.
+    const grid = resolveGrid(chooseGridInput(parsed, map), {
+      width: map.imageWidth,
+      height: map.imageHeight,
     });
 
-    c.get('logger').info('map updated', { uuid: updated.uuid, name: updated.name });
-    setFlash(c, { kind: 'success', message: `“${updated.name}” was saved.` });
+    // Re-encode before touching the row, but write nothing yet: `updateMap` can
+    // still reject the submission over a duplicate name, and the files on disk
+    // must not have moved on by the time it does.
+    const rescaled = grid.target ? await rescaleStored(map.uuid, grid.target) : null;
+
+    const updated = updateMap(
+      map.uuid,
+      {
+        name: parsed.name,
+        variant: parsed.variant,
+        tags: parsed.tags,
+        gridSize: grid.gridSize,
+        gridWidth: grid.gridWidth,
+        gridHeight: grid.gridHeight,
+        gridSource: grid.source,
+        // Cumulative, so the column always reads against the original upload.
+        upscaleFactor: map.upscaleFactor * grid.upscaleFactor,
+      },
+      rescaled ?? undefined,
+    );
+
+    if (rescaled) {
+      await storeImage(map.uuid, rescaled.full, rescaled.thumb);
+    }
+
+    c.get('logger').info('map updated', {
+      uuid: updated.uuid,
+      name: updated.name,
+      ...(rescaled ? { imageWidth: updated.imageWidth, imageHeight: updated.imageHeight } : {}),
+    });
+    setFlash(c, {
+      kind: 'success',
+      message: `“${updated.name}” was saved.` + gridNote(grid, updated.imageWidth, updated.imageHeight),
+    });
 
     return c.redirect(`/maps/${updated.uuid}`, 302);
   } catch (error) {

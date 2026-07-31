@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 import sharp from 'sharp';
 
 import { config } from '../src/config.ts';
-import { processUpload, sniffFormat } from '../src/images/process.ts';
+import { processUpload, rescaleStored, sniffFormat } from '../src/images/process.ts';
 import { fullImagePath, isValidUuid, shardFor, thumbImagePath } from '../src/images/storage.ts';
 import { ensureSchema, makeMapPng } from './helpers.ts';
 
@@ -91,6 +91,28 @@ describe('processUpload', () => {
     expect(result.grid).toMatchObject({ gridSize: 70, gridWidth: 4, gridHeight: 3, source: 'user' });
   });
 
+  test('enlarges the stored file so counted squares land on whole pixels', async () => {
+    // 1000 / 30 = 33.33…, so 34px squares across a 1020px image.
+    const result = await processUpload(await makeMapPng(1000, 1000, 100), {
+      grid: { gridWidth: 30, gridHeight: 30 },
+    });
+
+    expect(result.grid).toMatchObject({ gridSize: 34, gridWidth: 30, gridHeight: 30, source: 'user' });
+    expect(result.imageWidth).toBe(1020);
+    expect(result.imageHeight).toBe(1020);
+
+    const stored = await sharp(fullImagePath(result.uuid)).metadata();
+    expect(stored.width).toBe(1020);
+    expect(stored.height).toBe(1020);
+  });
+
+  test('leaves the file alone when the counts already divide it evenly', async () => {
+    const result = await processUpload(await makeMapPng(280, 210, 70), { grid: { gridWidth: 4, gridHeight: 3 } });
+
+    expect(result.grid).toMatchObject({ gridSize: 70, target: null, upscaleFactor: 1 });
+    expect(result.imageWidth).toBe(280);
+  });
+
   test('leaves the grid unrecorded when nothing was supplied', async () => {
     const result = await processUpload(await makeMapPng(), { grid: {} });
     expect(result.grid).toMatchObject({ gridSize: null, source: 'none', upscaleFactor: 1 });
@@ -130,6 +152,29 @@ describe('processUpload', () => {
       corrupt.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
       expect(processUpload(corrupt, { grid: {} })).rejects.toThrow(/could not be read|corrupt/i);
     });
+  });
+});
+
+describe('rescaleStored', () => {
+  test('re-encodes an existing map at the new size without writing it', async () => {
+    const uploaded = await processUpload(await makeMapPng(280, 210, 70), { grid: {} });
+    const before = await Bun.file(fullImagePath(uploaded.uuid)).arrayBuffer();
+
+    const rescaled = await rescaleStored(uploaded.uuid, { width: 300, height: 225 });
+
+    expect(rescaled.imageWidth).toBe(300);
+    expect(rescaled.imageHeight).toBe(225);
+    expect(rescaled.fileSize).toBe(rescaled.full.length);
+    expect((await sharp(rescaled.full).metadata()).format).toBe('webp');
+
+    // The caller commits the row first, so nothing on disk has moved yet.
+    const after = await Bun.file(fullImagePath(uploaded.uuid)).arrayBuffer();
+    expect(Buffer.compare(Buffer.from(before), Buffer.from(after))).toBe(0);
+  });
+
+  test('refuses a size WEBP cannot encode', async () => {
+    const uploaded = await processUpload(await makeMapPng(100, 80, 20), { grid: {} });
+    expect(rescaleStored(uploaded.uuid, { width: 20_000, height: 80 })).rejects.toThrow(/WEBP supports at most/);
   });
 });
 
