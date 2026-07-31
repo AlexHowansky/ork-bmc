@@ -1,11 +1,11 @@
-/** The page shell: document head, header navigation, flash messages, footer. */
+/** The page shell: document head, header navigation, and flash messages. */
 import type { FC, PropsWithChildren } from 'hono/jsx';
 import { raw } from 'hono/html';
 
 import { CSRF_FIELD } from '../security/csrf.ts';
 import type { Theme } from '../types.ts';
 import type { Role } from '../models/users.ts';
-import { button, link } from './ui.ts';
+import { button } from './ui.ts';
 
 export interface Flash {
   kind: 'success' | 'error' | 'info';
@@ -197,10 +197,6 @@ export const Layout: FC<PropsWithChildren<LayoutProps>> = ({
         {flash && <FlashBanner flash={flash} />}
         {children}
       </main>
-
-      <footer class="mx-auto max-w-7xl px-4 pb-10 text-xs text-stone-400 sm:px-6 lg:px-8 dark:text-stone-600">
-        Battle Mapper — <a class={link} href="/maps">map library</a> for tabletop games.
-      </footer>
     </body>
   </html>
 );
