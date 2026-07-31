@@ -183,7 +183,7 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
           value={values.variant}
           error={errors['variant']}
           placeholder="night"
-          hintText="Optional. Distinguishes versions, e.g. day / night / flooded."
+          hintText="Leave blank unless you expect to upload multiple variants of the same map, e.g. day / night / flooded."
         />
       </div>
 
@@ -194,7 +194,7 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
           value={values.tags}
           error={errors['tags']}
           placeholder="forest road camp"
-          hintText="Separated by spaces or commas. Lowercase letters only."
+          hintText="Tags may be letters only. Separate multiple tags by spaces or commas."
         />
       </div>
     </div>
