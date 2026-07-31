@@ -98,25 +98,16 @@ mapRoutes.get('/maps', (c) => {
     c,
     { title: hasFilters ? `Search · ${results.total} results` : 'Maps' },
     <div>
-      <div class="flex flex-wrap items-center justify-between gap-4">
-        <h1 class="text-2xl font-bold tracking-tight">Maps</h1>
-        {user.role === 'admin' && (
-          <a href="/maps/new" class={button.primary}>
-            Upload a map
-          </a>
-        )}
-      </div>
-
-      <div class="mt-6">
-        <SearchBar
-          text={text}
-          tags={rawTags}
-          tagMode={tagMode}
-          sort={sort}
-          popularTags={listAllTags().slice(0, 15)}
-          hasFilters={hasFilters}
-        />
-      </div>
+      {/* No heading and no upload button: the nav names the page, and carries
+          the admin's link to the upload form. */}
+      <SearchBar
+        text={text}
+        tags={rawTags}
+        tagMode={tagMode}
+        sort={sort}
+        popularTags={listAllTags().slice(0, 15)}
+        hasFilters={hasFilters}
+      />
 
       {results.maps.length === 0 ? (
         <EmptyState hasFilters={hasFilters} isAdmin={user.role === 'admin'} />
