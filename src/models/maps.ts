@@ -72,6 +72,43 @@ const toMap = (row: MapRow): MapRecord => ({
 });
 
 // ---------------------------------------------------------------------------
+// Names
+// ---------------------------------------------------------------------------
+
+export const MAX_NAME_LENGTH = 200;
+
+/**
+ * Derives a map name from the name of the file that was uploaded.
+ *
+ * Used as the default when the upload form arrives without one, so an admin who
+ * has already named the file on disk does not have to retype it. `public/app.js`
+ * carries an ES5 copy of this so the field fills in as soon as a file is picked;
+ * this is the authority, and the two must agree.
+ *
+ * Returns `''` when nothing usable is left, which leaves the caller's "please
+ * give the map a name" validation to speak.
+ */
+export function nameFromFilename(filename: string): string {
+  // Some clients still send a full path rather than a bare filename.
+  const base = filename.split(/[\\/]/).pop() ?? '';
+
+  // A leading-dot filename is all extension, so keep it rather than derive "".
+  const stem = base.replace(/\.[^.]+$/, '') || base;
+
+  return (
+    stem
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      // Only the first character of each word: "map 2 (night)" becomes
+      // "Map 2 (night)", and "DUNGEON" is left as the admin typed it.
+      .replace(/(^|\s)(\S)/g, (_match, lead: string, first: string) => lead + first.toUpperCase())
+      .slice(0, MAX_NAME_LENGTH)
+      .trim()
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Tags
 // ---------------------------------------------------------------------------
 

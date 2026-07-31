@@ -39,6 +39,10 @@ bun run db:migrate
 - **The CSP has no `unsafe-inline`.** No inline `<script>`, and no `style`
   attributes. The single dynamic style (the grid overlay) uses a per-request
   nonce; see `gridOverlayCss` in `views/Layout.tsx`.
+- **`public/app.js` duplicates one server function on purpose.**
+  `nameFromFilename` exists in both `src/models/maps.ts` (the authority, which
+  fills in a blank map name on upload) and as an ES5 copy in `app.js` (which
+  fills the field in as soon as a file is picked). Change one, change the other.
 - **Adding a route makes it private by default.** Anything reachable while
   signed out must be listed in `PUBLIC_PATHS` in `auth/middleware.ts`.
 - **A successful upload does not always redirect.** When the new image

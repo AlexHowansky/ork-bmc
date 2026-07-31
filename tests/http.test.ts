@@ -226,6 +226,45 @@ describe('map lifecycle', () => {
     expect(html).toContain('Entered manually');
   });
 
+  test('the upload form leaves the name optional and tags the file input for app.js', async () => {
+    const html = await (await admin.get('/maps/new')).text();
+
+    // The hook public/app.js listens for, and the absence of `required` that
+    // lets a JS-less admin submit a blank name for the server to derive.
+    expect(html).toContain('data-name-from-file');
+    expect(html).toMatch(/<input[^>]*id="name"[^>]*>/);
+    expect(html.match(/<input[^>]*id="name"[^>]*>/)![0]).not.toContain('required');
+  });
+
+  test('an upload with no name is named after the file', async () => {
+    const response = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), await makeMapPng(), { name: '' }, 'Lifecycle_sunken-temple 02.png'),
+    );
+    const uuid = uuidFromRedirect(response);
+
+    expect(findMap(uuid)!.name).toBe('Lifecycle Sunken Temple 02');
+  });
+
+  test('a name that was typed wins over the file name', async () => {
+    const response = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), await makeMapPng(), { name: 'Lifecycle Typed Name' }, 'ignored_file.png'),
+    );
+
+    expect(findMap(uuidFromRedirect(response))!.name).toBe('Lifecycle Typed Name');
+  });
+
+  test('a nameless upload with a bad tag comes back showing the derived name', async () => {
+    const response = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), await makeMapPng(), { name: '', tags: '123' }, 'Lifecycle_rejected.png'),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain('value="Lifecycle Rejected"');
+  });
+
   test('a map uploaded with no grid says so and offers to add one', async () => {
     const response = await admin.post(
       '/maps/new',

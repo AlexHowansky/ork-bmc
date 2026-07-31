@@ -125,11 +125,14 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
           <label for="image" class={label}>
             Map file <span class="text-red-600 dark:text-red-400">*</span>
           </label>
+          {/* `data-name-from-file` is what public/app.js looks for, so it can
+              fill the name field in as soon as a file is chosen. */}
           <input
             id="image"
             name="image"
             type="file"
             required
+            data-name-from-file
             accept="image/png,image/jpeg,image/webp"
             aria-describedby="image-hint"
             aria-invalid={errors['image'] ? 'true' : undefined}
@@ -173,9 +176,15 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
           labelText="Name"
           value={values.name}
           error={errors['name']}
-          required
+          // On upload a blank name is filled in from the file's own name, so
+          // the browser must not block the submission over it.
+          required={mode !== 'create'}
           placeholder="River Crossing"
-          hintText="The map's name. Variants of one map share a name."
+          hintText={
+            mode === 'create'
+              ? "The map's name. Variants of one map share a name. Leave it blank to use the file's name."
+              : "The map's name. Variants of one map share a name."
+          }
         />
         <Field
           name="variant"

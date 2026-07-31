@@ -84,6 +84,27 @@ the following features:
 
 * The maximum supported image file size should be configurable.
 
+* When the user submits the new map upload form or the map edit form, if the
+  grid width or grid height values have changed, then calculate if the grid
+  size is an integer. if not an integer, upscale the image the minimum amount
+  required to make the grid size an integer. For example, given an image that
+  is 1000x1000 pixels, if the user specifies a grid width of 30 and a grid
+  height of 30, then the image should be resized to 1020x1020 the grid size
+  should be set to 34. If the calculation determines that the grid size is not
+  square, abort with an error.
+
+* When a map is uploaded, generate a fingerprint for it. Use this fingerprint to
+  determine if this new image is substantially similar to any previously
+  uploaded map. If so, alert the user, showing all the matching images. Pre-fill
+  the map name field with the name from the matching map. Recommend to the user
+  that they leave the matching name and provide a new variant. Nothing should be
+  added to the library until the user confirms, and they must be able to discard
+  the upload instead. How similar two images must be to match should be
+  configurable.
+
+* When uploading a new map, default the map name to the file name of the
+  uploaded file.
+
 ## Additional Rules
 
 Always obey the following rules:

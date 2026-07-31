@@ -162,6 +162,7 @@ export function uploadForm(
   token: string,
   image: Buffer,
   overrides: Partial<Record<'name' | 'variant' | 'tags' | 'gridSize' | 'gridWidth' | 'gridHeight', string>> = {},
+  filename = 'map.png',
 ): FormData {
   const form = new FormData();
   form.set('_csrf', token);
@@ -171,7 +172,7 @@ export function uploadForm(
   form.set('gridSize', overrides.gridSize ?? '');
   form.set('gridWidth', overrides.gridWidth ?? '');
   form.set('gridHeight', overrides.gridHeight ?? '');
-  form.set('image', new File([image as unknown as BlobPart], 'map.png', { type: 'image/png' }));
+  form.set('image', new File([image as unknown as BlobPart], filename, { type: 'image/png' }));
   return form;
 }
 

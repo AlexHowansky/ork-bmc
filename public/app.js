@@ -5,6 +5,8 @@
  *
  *   - Theme toggle switches in-page instead of round-tripping.
  *   - Delete buttons ask for confirmation first.
+ *   - Choosing a file names the map after it. The server derives the same name
+ *     from a blank field, so this only makes it visible sooner.
  *
  * Loaded from same-origin so the strict `script-src 'self'` CSP allows it.
  */
@@ -34,6 +36,39 @@
     root.classList.remove('light', 'dark');
     if (theme !== 'system') root.classList.add(theme);
   }
+
+  // Mirrors `nameFromFilename` in src/models/maps.ts, which is the authority:
+  // the server applies the same rule to a name left blank. Keep the two in step.
+  function nameFromFilename(filename) {
+    var base = filename.split(/[\\/]/).pop() || '';
+    var stem = base.replace(/\.[^.]+$/, '') || base;
+    return stem
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/^\s+|\s+$/g, '')
+      .replace(/(^|\s)(\S)/g, function (match, lead, first) {
+        return lead + first.toUpperCase();
+      })
+      .slice(0, 200)
+      .replace(/^\s+|\s+$/g, '');
+  }
+
+  document.addEventListener('change', function (event) {
+    var input = event.target;
+    if (!input || !input.hasAttribute || !input.hasAttribute('data-name-from-file')) return;
+
+    var field = input.form && input.form.querySelector('input[name="name"]');
+    var file = input.files && input.files[0];
+    if (!field || !file) return;
+
+    // Only fill a field that is empty or still holds what this handler last
+    // wrote — a name the admin typed is theirs, and picking a second file
+    // should still follow the file.
+    if (field.value !== '' && field.value !== field.getAttribute('data-autofilled')) return;
+
+    field.value = nameFromFilename(file.name);
+    field.setAttribute('data-autofilled', field.value);
+  });
 
   document.addEventListener('submit', function (event) {
     var form = event.target;

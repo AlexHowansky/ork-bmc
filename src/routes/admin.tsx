@@ -18,8 +18,10 @@ import {
   deleteMap,
   findMap,
   findSimilarMaps,
+  nameFromFilename,
   parseTagInput,
   updateMap,
+  MAX_NAME_LENGTH,
   type MapRecord,
   type SimilarMap,
 } from '../models/maps.ts';
@@ -40,7 +42,6 @@ adminRoutes.use('/maps/new', requireAdmin());
 adminRoutes.use('/maps/:uuid/edit', requireAdmin());
 adminRoutes.use('/maps/:uuid/delete', requireAdmin());
 
-const MAX_NAME_LENGTH = 200;
 const MAX_VARIANT_LENGTH = 100;
 
 const emptyValues = (): MapFormValues => ({
@@ -97,15 +98,29 @@ interface ParsedForm {
   gridHeight: number | undefined;
 }
 
-function parseMapForm(body: Record<string, unknown>): { values: MapFormValues; parsed: ParsedForm } {
-  const values: MapFormValues = {
-    name: field(body, 'name'),
+/**
+ * Reads the form back without judging it, so a caller can hold on to what was
+ * submitted before validation gets a chance to throw and re-render.
+ *
+ * `fallbackName` stands in for a name the admin left blank — on upload it is the
+ * file's own name.
+ */
+function formValues(body: Record<string, unknown>, fallbackName = ''): MapFormValues {
+  return {
+    name: field(body, 'name') || fallbackName,
     variant: field(body, 'variant'),
     tags: field(body, 'tags'),
     gridSize: field(body, 'gridSize'),
     gridWidth: field(body, 'gridWidth'),
     gridHeight: field(body, 'gridHeight'),
   };
+}
+
+function parseMapForm(
+  body: Record<string, unknown>,
+  fallbackName = '',
+): { values: MapFormValues; parsed: ParsedForm } {
+  const values = formValues(body, fallbackName);
 
   const errors: Record<string, string> = {};
 
@@ -220,18 +235,23 @@ async function createFromUpload(c: Context<AppEnv>, body: Record<string, unknown
   let values = emptyValues();
 
   try {
-    const parsedForm = parseMapForm(body);
-    values = parsedForm.values;
-    const { parsed } = parsedForm;
-
+    // The file's name only, not its bytes: it is what an unnamed map is named
+    // after, and the checks below still own rejecting a file that is not usable.
     const file = body['image'];
+    const uploadedName = file instanceof File ? file.name.slice(0, 255) : '';
+
+    const fallbackName = nameFromFilename(uploadedName);
+    // Before validating, so a rejected submission comes back intact.
+    values = formValues(body, fallbackName);
+    const { parsed } = parseMapForm(body, fallbackName);
+
     if (!(file instanceof File) || file.size === 0) {
       throw validationFailed({ image: 'Please choose an image file to upload.' });
     }
 
     const bytes = new Uint8Array(await file.arrayBuffer());
     const processed = await processUpload(bytes, { grid: chooseGridInput(parsed) });
-    const originalFilename = file.name.slice(0, 255) || null;
+    const originalFilename = uploadedName || null;
 
     const matches = findSimilarMaps(processed.fingerprint);
     if (matches.length > 0) {
@@ -347,9 +367,11 @@ async function resolveStagedUpload(c: Context<AppEnv>, body: Record<string, unkn
   let values = valuesFromPending(pending);
 
   try {
-    const parsedForm = parseMapForm(body);
-    values = { ...parsedForm.values, ...gridValuesFromPending(pending) };
-    const { parsed } = parsedForm;
+    // The name is offered pre-filled from the map this matched, but an admin who
+    // clears it lands back on the same default the first submission would have had.
+    const fallbackName = nameFromFilename(pending.originalFilename ?? '');
+    values = { ...formValues(body, fallbackName), ...gridValuesFromPending(pending) };
+    const { parsed } = parseMapForm(body, fallbackName);
 
     const map = createMap({
       uuid: pending.uuid,
