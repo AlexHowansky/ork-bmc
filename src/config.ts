@@ -34,6 +34,12 @@ export interface Config {
     readonly analysisMaxDim: number;
   };
 
+  readonly fingerprint: {
+    readonly maxDistance: number;
+  };
+
+  readonly pendingUploadTtlSeconds: number;
+
   readonly sessionTtlSeconds: number;
   readonly sessionIdleSeconds: number;
   readonly cookieSecure: boolean;
@@ -154,6 +160,17 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): C
       maxPx: read.number('GRID_MAX_PX', 512, { min: 4, integer: true }),
       analysisMaxDim: read.number('GRID_ANALYSIS_MAX_DIM', 2400, { min: 256, integer: true }),
     },
+
+    fingerprint: {
+      // Out of 64 bits. Around 10 is the usual dividing line for a DCT hash:
+      // low enough that unrelated maps do not collide, high enough to survive a
+      // re-encode, a rescale, or a lighting change between two renders.
+      maxDistance: read.number('FINGERPRINT_MAX_DISTANCE', 10, { min: 0, max: 64, integer: true }),
+    },
+
+    // How long an upload held back for duplicate confirmation stays on disk
+    // before the maintenance sweep reclaims it.
+    pendingUploadTtlSeconds: read.number('PENDING_UPLOAD_TTL_SECONDS', 3600, { min: 60, integer: true }),
 
     sessionTtlSeconds: read.number('SESSION_TTL_SECONDS', 60 * 60 * 24 * 14, { min: 60, integer: true }),
     sessionIdleSeconds: read.number('SESSION_IDLE_SECONDS', 60 * 60 * 24 * 3, { min: 60, integer: true }),

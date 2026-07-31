@@ -8,12 +8,18 @@
  */
 import { Hono, type Context } from 'hono';
 
+import { requireAdmin } from '../auth/middleware.ts';
 import { notFound } from '../errors.ts';
 import { imageFile, isValidUuid } from '../images/storage.ts';
 import { findMap } from '../models/maps.ts';
+import { findPendingUpload } from '../models/pendingUploads.ts';
 import type { AppEnv } from '../types.ts';
 
 export const fileRoutes = new Hono<AppEnv>();
+
+// A staged upload has files but no map row, so it needs its own path. Four
+// segments, so it cannot be confused with `/i/:uuid/thumb` below.
+fileRoutes.use('/i/pending/*', requireAdmin());
 
 /**
  * Resolves the `:uuid` route parameter to a map, or throws a 404.
@@ -57,6 +63,23 @@ async function serve(
 
   return new Response(file, { headers });
 }
+
+/**
+ * The preview on the duplicate-confirmation page.
+ *
+ * Scoped to the admin who staged it, exactly as the confirmation itself is: the
+ * UUID is in a form field on their screen, and that must not be enough for
+ * anyone else to read an image the library has not accepted.
+ */
+fileRoutes.get('/i/pending/:uuid/thumb', async (c) => {
+  const uuid = c.req.param('uuid');
+  if (!isValidUuid(uuid)) throw notFound('That image is not waiting to be saved.');
+
+  const pending = findPendingUpload(uuid, c.get('user')!.id);
+  if (!pending) throw notFound('That image is not waiting to be saved.');
+
+  return serve(c, uuid, 'thumb');
+});
 
 fileRoutes.get('/i/:uuid/thumb', async (c) => serve(c, requireMapUuid(c.req.param('uuid')), 'thumb'));
 

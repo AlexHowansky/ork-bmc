@@ -103,18 +103,55 @@ export async function signedInAs(role: Role): Promise<Client> {
   return client;
 }
 
-/** Generates a PNG with a painted grid, as a battle map would have. */
-export async function makeMapPng(width = 280, height = 210, grid = 70): Promise<Buffer> {
+let imageSeed = 0;
+
+/**
+ * Generates a PNG with a painted grid, as a battle map would have.
+ *
+ * Every call paints a different map. That matters because uploads are now
+ * checked for near-duplicates: a fixture that looked the same every time would
+ * make the second upload in any test hit the duplicate warning instead of
+ * redirecting. Pass an explicit `seed` to ask for the same image twice, which is
+ * how a test says "upload a duplicate".
+ *
+ * The seed drives large blocks of light and dark rather than a colour tweak,
+ * because the fingerprint is taken from a greyscale 32×32 reduction — only
+ * low-frequency structure moves it.
+ */
+export async function makeMapPng(width = 280, height = 210, grid = 70, seed = ++imageSeed): Promise<Buffer> {
   const rgb = Buffer.alloc(width * height * 3);
+
+  // Four features whose positions and sizes are derived from the seed, so
+  // consecutive seeds produce visibly different arrangements.
+  const blobs = Array.from({ length: 4 }, (_, n) => {
+    const salt = seed * 7919 + n * 104_729;
+    return {
+      cx: (salt % 97) / 97,
+      cy: ((salt >> 3) % 89) / 89,
+      radius: 0.12 + (((salt >> 6) % 23) / 23) * 0.18,
+      dark: ((salt >> 9) & 1) === 1,
+    };
+  });
+
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = (y * width + x) * 3;
       const onLine = x % grid === 0 || y % grid === 0;
-      rgb[i] = onLine ? 40 : 110;
-      rgb[i + 1] = onLine ? 34 : 130;
-      rgb[i + 2] = onLine ? 28 : 80;
+
+      let shade = 0;
+      for (const blob of blobs) {
+        const dx = x / width - blob.cx;
+        const dy = y / height - blob.cy;
+        if (dx * dx + dy * dy < blob.radius * blob.radius) shade += blob.dark ? -45 : 45;
+      }
+
+      const clamp = (value: number) => Math.max(0, Math.min(255, value));
+      rgb[i] = onLine ? 40 : clamp(110 + shade);
+      rgb[i + 1] = onLine ? 34 : clamp(130 + shade);
+      rgb[i + 2] = onLine ? 28 : clamp(80 + shade);
     }
   }
+
   return sharp(rgb, { raw: { width, height, channels: 3 } }).png().toBuffer();
 }
 

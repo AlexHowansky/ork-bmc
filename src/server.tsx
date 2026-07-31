@@ -22,8 +22,9 @@ import { purgeExpiredSessions } from './auth/session.ts';
 import { config } from './config.ts';
 import { migrate } from './db/migrate.ts';
 import { AppError, isAppError, payloadTooLarge } from './errors.ts';
-import { ensureImageDir } from './images/storage.ts';
+import { deleteImage, ensureImageDir } from './images/storage.ts';
 import { log } from './log.ts';
+import { expiredPendingUploads } from './models/pendingUploads.ts';
 import { adminRoutes } from './routes/admin.tsx';
 import { authRoutes } from './routes/auth.tsx';
 import { fileRoutes } from './routes/files.ts';
@@ -132,21 +133,35 @@ app.onError((error, c) => {
 
 /** Periodic cleanup of rows that have aged out. */
 function startMaintenance(): void {
-  const runSweep = () => {
+  const runSweep = async () => {
     try {
       const sessions = purgeExpiredSessions();
       const buckets = purgeStaleBuckets();
-      if (sessions > 0 || buckets > 0) {
-        log.debug('maintenance sweep', { expiredSessions: sessions, staleRateLimitBuckets: buckets });
+
+      // An upload staged for duplicate confirmation and then abandoned owns two
+      // files that nothing else will ever reclaim, so the row and the files go
+      // together. Rows first: an orphaned file is a smaller problem than a row
+      // pointing at a file that is already gone.
+      const staged = expiredPendingUploads();
+      for (const uuid of staged) {
+        await deleteImage(uuid);
+      }
+
+      if (sessions > 0 || buckets > 0 || staged.length > 0) {
+        log.debug('maintenance sweep', {
+          expiredSessions: sessions,
+          staleRateLimitBuckets: buckets,
+          abandonedUploads: staged.length,
+        });
       }
     } catch (error) {
       log.error('maintenance sweep failed', { error });
     }
   };
 
-  runSweep();
+  void runSweep();
   // `unref` so this timer never keeps the process alive on shutdown.
-  setInterval(runSweep, 60 * 60 * 1000).unref();
+  setInterval(() => void runSweep(), 60 * 60 * 1000).unref();
 }
 
 if (import.meta.main) {

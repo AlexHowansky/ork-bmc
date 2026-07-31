@@ -5,6 +5,8 @@
 import { beforeAll, describe, expect, test } from 'bun:test';
 import sharp from 'sharp';
 
+import { hammingDistance } from '../src/images/fingerprint.ts';
+import { fullImagePath, thumbImagePath } from '../src/images/storage.ts';
 import { createMap, findMap } from '../src/models/maps.ts';
 import { Client, ensureSchema, makeMapPng, makeUser, signedInAs, uploadForm, uuidFromRedirect } from './helpers.ts';
 
@@ -215,7 +217,7 @@ describe('map lifecycle', () => {
   test('upload derives the square counts from the grid size', async () => {
     const response = await admin.post(
       '/maps/new',
-      uploadForm(await admin.csrfToken(), png, { name: 'Lifecycle Derivation', gridSize: '70' }),
+      uploadForm(await admin.csrfToken(), await makeMapPng(), { name: 'Lifecycle Derivation', gridSize: '70' }),
     );
     const uuid = uuidFromRedirect(response);
 
@@ -227,7 +229,7 @@ describe('map lifecycle', () => {
   test('a map uploaded with no grid says so and offers to add one', async () => {
     const response = await admin.post(
       '/maps/new',
-      uploadForm(await admin.csrfToken(), png, { name: 'Lifecycle No Grid' }),
+      uploadForm(await admin.csrfToken(), await makeMapPng(), { name: 'Lifecycle No Grid' }),
     );
     const html = await (await admin.get(`/maps/${uuidFromRedirect(response)}`)).text();
     expect(html).toContain('No grid recorded');
@@ -236,7 +238,7 @@ describe('map lifecycle', () => {
   test('editing can add a grid afterwards', async () => {
     const created = await admin.post(
       '/maps/new',
-      uploadForm(await admin.csrfToken(), png, { name: 'Lifecycle Edit Target' }),
+      uploadForm(await admin.csrfToken(), await makeMapPng(), { name: 'Lifecycle Edit Target' }),
     );
     const uuid = uuidFromRedirect(created);
 
@@ -370,7 +372,12 @@ describe('map lifecycle', () => {
   });
 
   test('a duplicate name and variant is refused with a helpful message', async () => {
-    const form = uploadForm(await admin.csrfToken(), png, { name: 'Fixture River Crossing', variant: 'day' });
+    // A visually distinct image, so this stays a test of the name/variant
+    // constraint rather than tripping the near-duplicate check first.
+    const form = uploadForm(await admin.csrfToken(), await makeMapPng(), {
+      name: 'Fixture River Crossing',
+      variant: 'day',
+    });
     const response = await admin.post('/maps/new', form);
 
     expect(response.status).toBe(409);
@@ -380,7 +387,7 @@ describe('map lifecycle', () => {
   test('the same name with a different variant is allowed and links as a sibling', async () => {
     const response = await admin.post(
       '/maps/new',
-      uploadForm(await admin.csrfToken(), png, { name: 'Fixture River Crossing', variant: 'night' }),
+      uploadForm(await admin.csrfToken(), await makeMapPng(), { name: 'Fixture River Crossing', variant: 'night' }),
     );
     expect(response.status).toBe(302);
 
@@ -392,7 +399,7 @@ describe('map lifecycle', () => {
   test('delete removes the map and its images', async () => {
     const created = await admin.post(
       '/maps/new',
-      uploadForm(await admin.csrfToken(), png, { name: 'Lifecycle Delete Target' }),
+      uploadForm(await admin.csrfToken(), await makeMapPng(), { name: 'Lifecycle Delete Target' }),
     );
     const uuid = uuidFromRedirect(created);
 
@@ -403,6 +410,163 @@ describe('map lifecycle', () => {
 
     expect((await admin.get(`/maps/${uuid}`)).status).toBe(404);
     expect((await admin.get(`/i/${uuid}/full`)).status).toBe(404);
+  });
+});
+
+describe('duplicate detection', () => {
+  /** Uploads an image and returns the response, without asserting what it is. */
+  const upload = (client: Client, image: Buffer, overrides: Record<string, string> = {}) =>
+    client.csrfToken().then((token) => client.post('/maps/new', uploadForm(token, image, overrides)));
+
+  /** Pulls the staged UUID back out of the confirmation form. */
+  const stagedUuidFrom = (html: string): string =>
+    /name="pendingUuid" value="([0-9a-f-]{36})"/.exec(html)?.[1] ?? '';
+
+  const confirm = async (client: Client, pendingUuid: string, fields: Record<string, string>) => {
+    const body = new URLSearchParams({
+      _csrf: await client.csrfToken(),
+      pendingUuid,
+      name: '',
+      variant: '',
+      tags: '',
+      ...fields,
+    });
+    return client.post('/maps/new', body);
+  };
+
+  test('a re-upload of the same image is held back and shows what it matched', async () => {
+    const image = await makeMapPng(400, 300, 50);
+    const first = await upload(admin, image, { name: 'Sunken Chapel' });
+    expect(first.status).toBe(302);
+
+    const second = await upload(admin, image, { name: 'Something Else Entirely' });
+
+    // Not a redirect: nothing was created.
+    expect(second.status).toBe(200);
+    const html = await second.text();
+    expect(html).toContain('This looks like a map you already have');
+    // The matching map is shown, thumbnail and all.
+    expect(html).toContain(`/i/${uuidFromRedirect(first)}/thumb`);
+    expect(html).toContain('Identical');
+    // And the name field is pre-filled from it, not from what was typed.
+    expect(html).toContain('value="Sunken Chapel"');
+    expect(html).not.toContain('Something Else Entirely');
+  });
+
+  test('the staged image is previewed, and only to the admin who staged it', async () => {
+    const image = await makeMapPng(400, 300, 50);
+    await upload(admin, image, { name: 'Preview Source' });
+    const staged = stagedUuidFrom(await (await upload(admin, image, { name: 'Preview Source' })).text());
+
+    expect((await admin.get(`/i/pending/${staged}/thumb`)).status).toBe(200);
+
+    // A viewer has no business seeing an image the library has not accepted.
+    expect((await viewer.get(`/i/pending/${staged}/thumb`)).status).toBe(403);
+
+    // Nor does another admin, even knowing the UUID.
+    const otherAdmin = await signedInAs('admin');
+    expect((await otherAdmin.get(`/i/pending/${staged}/thumb`)).status).toBe(404);
+  });
+
+  test('confirming with a variant saves it alongside the map it matched', async () => {
+    const image = await makeMapPng(400, 300, 50);
+    const original = uuidFromRedirect(await upload(admin, image, { name: 'Bandit Camp' }));
+    const staged = stagedUuidFrom(await (await upload(admin, image, { name: 'Bandit Camp' })).text());
+
+    const saved = await confirm(admin, staged, { name: 'Bandit Camp', variant: 'night' });
+    expect(saved.status).toBe(302);
+
+    // It kept the UUID its files were written under, so nothing was re-encoded.
+    expect(uuidFromRedirect(saved)).toBe(staged);
+    expect(findMap(staged)?.variant).toBe('night');
+
+    const html = await (await admin.get(`/maps/${original}`)).text();
+    expect(html).toContain('Other variants');
+    expect(html).toContain('night');
+  });
+
+  test('confirming without a variant explains the clash and keeps the form usable', async () => {
+    const image = await makeMapPng(400, 300, 50);
+    await upload(admin, image, { name: 'Toll Bridge' });
+    const staged = stagedUuidFrom(await (await upload(admin, image, { name: 'Toll Bridge' })).text());
+
+    const clash = await confirm(admin, staged, { name: 'Toll Bridge', variant: '' });
+    expect(clash.status).toBe(409);
+
+    const html = await clash.text();
+    expect(html).toContain('already exists');
+    // The upload is not stranded: the matches and the staged UUID come back.
+    expect(html).toContain('This looks like a map you already have');
+    expect(stagedUuidFrom(html)).toBe(staged);
+
+    // And it can still be saved once a variant is supplied.
+    expect((await confirm(admin, staged, { name: 'Toll Bridge', variant: 'flooded' })).status).toBe(302);
+  });
+
+  test('discarding removes the staged row and both files', async () => {
+    const image = await makeMapPng(400, 300, 50);
+    await upload(admin, image, { name: 'Discarded Ruin' });
+    const staged = stagedUuidFrom(await (await upload(admin, image, { name: 'Discarded Ruin' })).text());
+
+    expect((await admin.get(`/i/pending/${staged}/thumb`)).status).toBe(200);
+
+    const discarded = await confirm(admin, staged, { action: 'discard' });
+    expect(discarded.status).toBe(302);
+    expect(discarded.headers.get('location')).toBe('/maps/new');
+
+    expect(findMap(staged)).toBeNull();
+    expect((await admin.get(`/i/pending/${staged}/thumb`)).status).toBe(404);
+    expect(await Bun.file(fullImagePath(staged)).exists()).toBe(false);
+    expect(await Bun.file(thumbImagePath(staged)).exists()).toBe(false);
+  });
+
+  test('a staged upload belonging to another admin cannot be committed', async () => {
+    const image = await makeMapPng(400, 300, 50);
+    await upload(admin, image, { name: 'Borrowed Keep' });
+    const staged = stagedUuidFrom(await (await upload(admin, image, { name: 'Borrowed Keep' })).text());
+
+    const thief = await signedInAs('admin');
+    const stolen = await confirm(thief, staged, { name: 'Borrowed Keep', variant: 'stolen' });
+
+    expect(stolen.status).toBe(404);
+    expect(findMap(staged)).toBeNull();
+
+    // Still the original admin's to save.
+    expect((await confirm(admin, staged, { name: 'Borrowed Keep', variant: 'mine' })).status).toBe(302);
+  });
+
+  test('a visibly different map is uploaded without a word about duplicates', async () => {
+    await upload(admin, await makeMapPng(400, 300, 50), { name: 'Unrelated One' });
+    const response = await upload(admin, await makeMapPng(400, 300, 50), { name: 'Unrelated Two' });
+
+    expect(response.status).toBe(302);
+  });
+
+  test('the fingerprint is recorded, and follows the image when an edit resizes it', async () => {
+    const created = await upload(admin, await makeMapPng(1000, 1000, 100), { name: 'Resized Fingerprint' });
+    const uuid = uuidFromRedirect(created);
+    const before = findMap(uuid)!.fingerprint!;
+    expect(before).toMatch(/^[0-9a-f]{16}$/);
+
+    // 30 squares across 1000px does not divide evenly, so the image is enlarged.
+    await admin.post(
+      `/maps/${uuid}/edit`,
+      new URLSearchParams({
+        _csrf: await admin.csrfToken(),
+        name: 'Resized Fingerprint',
+        variant: '',
+        tags: '',
+        gridSize: '',
+        gridWidth: '30',
+        gridHeight: '30',
+      }),
+    );
+
+    const after = findMap(uuid)!;
+    expect(after.imageWidth).toBe(1020);
+    // Re-taken from the new pixels, and still recognisably the same map.
+    expect(after.fingerprint).toMatch(/^[0-9a-f]{16}$/);
+    expect(hammingDistance(before, after.fingerprint!)).toBeLessThanOrEqual(8);
   });
 });
 
@@ -462,7 +626,10 @@ describe('security headers', () => {
 describe('output escaping', () => {
   test('a map name containing markup is rendered as text', async () => {
     const hostile = 'XSS <script>alert(1)</script> & "quoted"';
-    const response = await admin.post('/maps/new', uploadForm(await admin.csrfToken(), png, { name: hostile }));
+    const response = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), await makeMapPng(), { name: hostile }),
+    );
 
     const html = await (await admin.get(`/maps/${uuidFromRedirect(response)}`)).text();
     expect(html).not.toContain('<script>alert(1)</script>');
@@ -506,6 +673,9 @@ describe('pagination', () => {
         imageWidth: 100,
         imageHeight: 100,
         fileSize: 1,
+        // No image was encoded, so there is nothing to fingerprint — the same
+        // state as a map uploaded before fingerprinting existed.
+        fingerprint: null,
         originalFilename: null,
         uploadedBy: null,
       });

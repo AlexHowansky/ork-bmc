@@ -11,18 +11,27 @@ import { requireAdmin } from '../auth/middleware.ts';
 import { badRequest, notFound, validationFailed } from '../errors.ts';
 import { processUpload, rescaleStored } from '../images/process.ts';
 import { resolveGrid, type GridInput, type ResolvedGrid } from '../images/grid.ts';
-import { deleteImage, storeImage } from '../images/storage.ts';
+import { deleteImage, isValidUuid, storeImage } from '../images/storage.ts';
 import {
   assertTagsAcceptable,
   createMap,
   deleteMap,
   findMap,
+  findSimilarMaps,
   parseTagInput,
   updateMap,
   type MapRecord,
+  type SimilarMap,
 } from '../models/maps.ts';
+import {
+  createPendingUpload,
+  deletePendingUpload,
+  findPendingUpload,
+  type PendingUpload,
+} from '../models/pendingUploads.ts';
 import type { AppEnv } from '../types.ts';
-import { MapForm, type MapFormValues } from '../views/MapForm.tsx';
+import { DuplicateWarning } from '../views/DuplicateWarning.tsx';
+import { MapForm, type MapFormMode, type MapFormValues, type StagedUpload } from '../views/MapForm.tsx';
 import { page, setFlash } from '../views/render.tsx';
 
 export const adminRoutes = new Hono<AppEnv>();
@@ -184,8 +193,27 @@ adminRoutes.get('/maps/new', (c) =>
   ),
 );
 
+/**
+ * Handles the upload form, in either of the two states it can be submitted from.
+ *
+ * A first submission carries a file. If its fingerprint does not resemble
+ * anything in the library — the overwhelmingly common case — the map is created
+ * and this behaves exactly as it always has. If it does, the processed image is
+ * staged instead and the admin is shown what it matched, so they can decide
+ * whether they meant to add a variant of a map they already have.
+ *
+ * A second submission carries `pendingUuid` instead of a file, and either
+ * commits that staged upload or throws it away.
+ */
 adminRoutes.post('/maps/new', async (c) => {
   const body = await c.req.parseBody();
+
+  return typeof body['pendingUuid'] === 'string' && body['pendingUuid'] !== ''
+    ? resolveStagedUpload(c, body)
+    : createFromUpload(c, body);
+});
+
+async function createFromUpload(c: Context<AppEnv>, body: Record<string, unknown>): Promise<Response> {
   const logger = c.get('logger');
   const user = c.get('user')!;
 
@@ -203,6 +231,43 @@ adminRoutes.post('/maps/new', async (c) => {
 
     const bytes = new Uint8Array(await file.arrayBuffer());
     const processed = await processUpload(bytes, { grid: chooseGridInput(parsed) });
+    const originalFilename = file.name.slice(0, 255) || null;
+
+    const matches = findSimilarMaps(processed.fingerprint);
+    if (matches.length > 0) {
+      // Stage rather than commit: the admin is about to be shown the matches and
+      // may well want the name of one of them, which is no longer a choice once
+      // the row exists.
+      const pending = createPendingUpload({
+        uuid: processed.uuid,
+        userId: user.id,
+        fingerprint: processed.fingerprint,
+        gridSize: processed.grid.gridSize,
+        gridWidth: processed.grid.gridWidth,
+        gridHeight: processed.grid.gridHeight,
+        imageWidth: processed.imageWidth,
+        imageHeight: processed.imageHeight,
+        fileSize: processed.fileSize,
+        gridSource: processed.grid.source,
+        upscaleFactor: processed.grid.upscaleFactor,
+        originalFilename,
+      });
+
+      logger.info('upload staged as a possible duplicate', {
+        uuid: pending.uuid,
+        fingerprint: pending.fingerprint,
+        matches: matches.length,
+        nearest: matches[0]!.distance,
+      });
+
+      return renderDuplicateWarning(c, pending, matches, {
+        ...values,
+        // The requirement: offer the matching map's name, so keeping it and
+        // adding a variant is the path of least resistance.
+        name: matches[0]!.map.name,
+        variant: '',
+      });
+    }
 
     try {
       const map = createMap({
@@ -218,7 +283,8 @@ adminRoutes.post('/maps/new', async (c) => {
         imageWidth: processed.imageWidth,
         imageHeight: processed.imageHeight,
         fileSize: processed.fileSize,
-        originalFilename: file.name.slice(0, 255) || null,
+        fingerprint: processed.fingerprint,
+        originalFilename,
         uploadedBy: user.id,
       });
 
@@ -241,7 +307,140 @@ adminRoutes.post('/maps/new', async (c) => {
   } catch (error) {
     return renderFormError(c, error, 'create', '/maps/new', values);
   }
+}
+
+/**
+ * Commits or discards an upload that was held back as a possible duplicate.
+ *
+ * The staged row is the authority for everything measured from the image — its
+ * dimensions, the grid it was already resized to fit, its fingerprint. Only the
+ * name, variant and tags come from this submission, because only those are the
+ * admin's to change at this point. Nothing here trusts the hidden field beyond
+ * naming a row that `findPendingUpload` will only return for this user and only
+ * while it is still fresh.
+ */
+async function resolveStagedUpload(c: Context<AppEnv>, body: Record<string, unknown>): Promise<Response> {
+  const logger = c.get('logger');
+  const user = c.get('user')!;
+
+  const pendingUuid = field(body, 'pendingUuid');
+  const pending = isValidUuid(pendingUuid) ? findPendingUpload(pendingUuid, user.id) : null;
+
+  if (!pending) {
+    logger.warn('staged upload could not be resolved', { pendingUuid });
+    throw notFound(
+      'That upload is no longer waiting to be saved — it may have been discarded, or left too long. Please upload the file again.',
+    );
+  }
+
+  if (field(body, 'action') === 'discard') {
+    deletePendingUpload(pending.uuid);
+    await deleteImage(pending.uuid);
+
+    logger.info('staged upload discarded', { uuid: pending.uuid });
+    setFlash(c, { kind: 'info', message: 'That upload was discarded. Nothing was added to the library.' });
+
+    return c.redirect('/maps/new', 302);
+  }
+
+  const matches = findSimilarMaps(pending.fingerprint);
+  let values = valuesFromPending(pending);
+
+  try {
+    const parsedForm = parseMapForm(body);
+    values = { ...parsedForm.values, ...gridValuesFromPending(pending) };
+    const { parsed } = parsedForm;
+
+    const map = createMap({
+      uuid: pending.uuid,
+      name: parsed.name,
+      variant: parsed.variant,
+      tags: parsed.tags,
+      gridSize: pending.gridSize,
+      gridWidth: pending.gridWidth,
+      gridHeight: pending.gridHeight,
+      gridSource: pending.gridSource,
+      upscaleFactor: pending.upscaleFactor,
+      imageWidth: pending.imageWidth,
+      imageHeight: pending.imageHeight,
+      fileSize: pending.fileSize,
+      fingerprint: pending.fingerprint,
+      originalFilename: pending.originalFilename,
+      uploadedBy: user.id,
+    });
+
+    // Only once the row is safely in: until this point the staged row is what
+    // keeps the files on disk accounted for.
+    deletePendingUpload(pending.uuid);
+
+    logger.info('map created from staged upload', { uuid: map.uuid, name: map.name, variant: map.variant });
+    setFlash(c, {
+      kind: 'success',
+      message: `“${map.name}” was saved despite matching ${
+        matches.length === 1 ? 'an existing map' : `${matches.length} existing maps`
+      }.`,
+    });
+
+    return c.redirect(`/maps/${map.uuid}`, 302);
+  } catch (error) {
+    // Keeping the name and forgetting the variant is the likeliest way to land
+    // here, so the form must come back intact rather than stranding the upload.
+    return renderFormError(c, error, 'confirm', '/maps/new', values, undefined, {
+      staged: stagedFrom(pending),
+      matches,
+    });
+  }
+}
+
+const gridValuesFromPending = (pending: PendingUpload): Pick<MapFormValues, 'gridSize' | 'gridWidth' | 'gridHeight'> => ({
+  gridSize: pending.gridSize?.toString() ?? '',
+  gridWidth: pending.gridWidth?.toString() ?? '',
+  gridHeight: pending.gridHeight?.toString() ?? '',
 });
+
+const valuesFromPending = (pending: PendingUpload): MapFormValues => ({
+  name: '',
+  variant: '',
+  tags: '',
+  ...gridValuesFromPending(pending),
+});
+
+const stagedFrom = (pending: PendingUpload): StagedUpload => ({
+  uuid: pending.uuid,
+  imageWidth: pending.imageWidth,
+  imageHeight: pending.imageHeight,
+  gridSize: pending.gridSize,
+  gridWidth: pending.gridWidth,
+  gridHeight: pending.gridHeight,
+});
+
+/** The interstitial: what the upload matched, over a form that can commit it. */
+function renderDuplicateWarning(
+  c: Context<AppEnv>,
+  pending: PendingUpload,
+  matches: SimilarMap[],
+  values: MapFormValues,
+): Response {
+  return page(
+    c,
+    { title: 'Possible duplicate' },
+    <div class="mx-auto max-w-3xl">
+      <h1 class="text-2xl font-bold tracking-tight">Upload a map</h1>
+      <div class="mt-6">
+        <DuplicateWarning matches={matches} />
+      </div>
+      <div class="mt-8">
+        <MapForm
+          mode="confirm"
+          action="/maps/new"
+          csrfToken={c.get('csrfToken')}
+          values={values}
+          staged={stagedFrom(pending)}
+        />
+      </div>
+    </div>,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Edit
@@ -364,10 +563,12 @@ adminRoutes.post('/maps/:uuid/delete', async (c) => {
 function renderFormError(
   c: Context<AppEnv>,
   error: unknown,
-  mode: 'create' | 'edit',
+  mode: MapFormMode,
   action: string,
   values: MapFormValues,
   map?: MapRecord,
+  /** Present when the rejected submission was committing a staged upload. */
+  pending?: { staged: StagedUpload; matches: SimilarMap[] },
 ): Response {
   const isFieldError =
     error !== null && typeof error === 'object' && 'fields' in error && (error as { fields?: unknown }).fields;
@@ -377,17 +578,26 @@ function renderFormError(
   const appError = error as { userMessage: string; status: number; fields: Record<string, string> };
   c.get('logger').warn('map form rejected', { fields: Object.keys(appError.fields) });
 
+  const heading = mode === 'edit' ? `Edit “${map?.name}”` : 'Upload a map';
+
   return page(
     c,
-    { title: mode === 'create' ? 'Upload a map' : 'Edit map', status: appError.status },
+    { title: mode === 'edit' ? 'Edit map' : 'Upload a map', status: appError.status },
     <div class="mx-auto max-w-3xl">
-      <h1 class="text-2xl font-bold tracking-tight">{mode === 'create' ? 'Upload a map' : `Edit “${map?.name}”`}</h1>
+      <h1 class="text-2xl font-bold tracking-tight">{heading}</h1>
       <div
         role="alert"
         class="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/60 dark:text-red-200"
       >
         {appError.userMessage}
       </div>
+      {/* The matches stay on screen: they are the reason the admin is being
+          asked for a variant in the first place. */}
+      {pending && (
+        <div class="mt-6">
+          <DuplicateWarning matches={pending.matches} />
+        </div>
+      )}
       <div class="mt-8">
         <MapForm
           mode={mode}
@@ -405,6 +615,7 @@ function renderFormError(
                 }
               : undefined
           }
+          staged={pending?.staged}
         />
       </div>
     </div>,

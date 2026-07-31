@@ -10,6 +10,7 @@ import sharp from 'sharp';
 import { config } from '../config.ts';
 import { badRequest, payloadTooLarge } from '../errors.ts';
 import { log } from '../log.ts';
+import { fingerprintImage } from './fingerprint.ts';
 import {
   fitGridToCounts,
   resolveGrid,
@@ -58,6 +59,8 @@ export interface ProcessedImage {
   imageHeight: number;
   fileSize: number;
   grid: ResolvedGrid;
+  /** Taken from the stored pixels, for recognising a map already in the library. */
+  fingerprint: string;
 }
 
 export interface ProcessOptions {
@@ -132,6 +135,12 @@ export async function processUpload(bytes: Uint8Array, options: ProcessOptions):
   const full = await output.webp({ lossless: true, effort: 4 }).toBuffer();
   const thumb = await makeThumbnail(full);
 
+  // Taken from the encoded output rather than the source bytes, so the stored
+  // fingerprint always describes the file that is actually on disk — including
+  // any enlargement the grid called for. The hash is computed from a 32×32
+  // reduction, so that enlargement makes almost no difference to it.
+  const fingerprint = await fingerprintImage(full);
+
   await storeImage(uuid, full, thumb);
 
   // Rotation can transpose the dimensions, so read them back from the encoded
@@ -149,9 +158,10 @@ export async function processUpload(bytes: Uint8Array, options: ProcessOptions):
     imageHeight,
     upscaleFactor: grid.upscaleFactor,
     gridSource: grid.source,
+    fingerprint,
   });
 
-  return { uuid, imageWidth, imageHeight, fileSize: full.length, grid };
+  return { uuid, imageWidth, imageHeight, fileSize: full.length, grid, fingerprint };
 }
 
 export interface RescaledImage {
@@ -160,6 +170,7 @@ export interface RescaledImage {
   imageWidth: number;
   imageHeight: number;
   fileSize: number;
+  fingerprint: string;
 }
 
 /**
@@ -185,12 +196,17 @@ export async function rescaleStored(uuid: string, target: TargetSize): Promise<R
 
   const thumb = await makeThumbnail(full);
   const meta = await sharp(full).metadata();
+  // Re-taken so the column keeps describing the file on disk. A resize this
+  // small barely moves the hash, which is the point — the map is still findable
+  // as a near-duplicate of whatever it was a near-duplicate of before.
+  const fingerprint = await fingerprintImage(full);
 
   log.info('image rescaled', {
     uuid,
     imageWidth: meta.width ?? target.width,
     imageHeight: meta.height ?? target.height,
     storedBytes: full.length,
+    fingerprint,
   });
 
   return {
@@ -199,6 +215,7 @@ export async function rescaleStored(uuid: string, target: TargetSize): Promise<R
     imageWidth: meta.width ?? target.width,
     imageHeight: meta.height ?? target.height,
     fileSize: full.length,
+    fingerprint,
   };
 }
 

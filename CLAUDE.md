@@ -41,6 +41,12 @@ bun run db:migrate
   nonce; see `gridOverlayCss` in `views/Layout.tsx`.
 - **Adding a route makes it private by default.** Anything reachable while
   signed out must be listed in `PUBLIC_PATHS` in `auth/middleware.ts`.
+- **A successful upload does not always redirect.** When the new image
+  fingerprints close to a map already in the library, `POST /maps/new` returns
+  200 with a confirmation form and a `pending_uploads` row; the map is created
+  by a second POST carrying `pendingUuid`. Tests that upload the same fixture
+  twice will hit this — `makeMapPng` paints a different map per call for that
+  reason, and takes a `seed` when a test wants a deliberate duplicate.
 
 ## Conventions
 
@@ -54,6 +60,9 @@ bun run db:migrate
   `buildMatchExpression`; never interpolate user text into a MATCH expression.
 - Storage paths are derived only from a validated UUID v4. Do not add a code
   path that builds a path from anything else.
+- A staged upload's UUID travels through a hidden form field, so it is never
+  treated as a capability: `findPendingUpload` scopes every lookup to the
+  uploader and to the TTL.
 
 ## Not implemented
 

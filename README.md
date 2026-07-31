@@ -100,6 +100,20 @@ rejected rather than stretched, and an enlargement beyond `GRID_MAX_UPSCALE` or
 `night`, `flooded`. Maps sharing a name are linked to each other, and each
 name/variant pair must be unique.
 
+**Duplicate detection.** Every upload is fingerprinted, and if it looks like a
+map already in the library the upload pauses rather than joining it. You are
+shown what it matched, with the name field already filled in from the closest
+match, and asked to give this one a variant — so a second render of a map you
+already have lands next to it instead of starting a rival entry. If it really is
+a different map, change the name back and save; if it was a mistake, discard it.
+
+The fingerprint is a 64-bit perceptual hash taken from a 32×32 greyscale
+reduction of the stored image, so it survives rescaling (including the
+enlargement above), re-encoding, cropping, and lighting changes, while two
+genuinely different maps land nowhere near each other.
+`FINGERPRINT_MAX_DISTANCE` sets how close counts as a match. Maps uploaded
+before this existed have no fingerprint and are never offered as matches.
+
 **Searching.** Search by name, by tags, or both. Tags are lowercase letters
 only, separated by spaces or commas. Multiple tags can be matched with *Any*
 (OR) or *All* (AND). Everything is case-insensitive, and a search is a
@@ -121,6 +135,8 @@ The settings most worth reviewing:
 | `COOKIE_SECURE` | `true` | Set `false` only when serving over plain HTTP. |
 | `TRUST_PROXY` | `false` | Enable behind a reverse proxy so `X-Forwarded-For` is honoured. |
 | `PAGE_SIZE` | `24` | Maps per page. |
+| `FINGERPRINT_MAX_DISTANCE` | `10` | Of 64 bits. How alike two maps must look to be reported as duplicates. |
+| `PENDING_UPLOAD_TTL_SECONDS` | `3600` | How long an upload awaiting duplicate confirmation is kept. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
 
 ## Security
@@ -161,7 +177,7 @@ rather than opening a public issue.
 ## Development
 
 ```bash
-bun test          # 129 tests
+bun test          # 174 tests
 bun run typecheck # tsc --noEmit
 bun run css:watch # rebuild CSS on change
 ```
@@ -172,10 +188,10 @@ bun run css:watch # rebuild CSS on change
 src/
   config.ts     log.ts     errors.ts     server.tsx
   db/           schema and forward-only migrations
-  models/       users, maps, tag normalisation, search query builder
+  models/       users, maps, staged uploads, tag normalisation, search
   auth/         password hashing, sessions, access-control middleware
   security/     CSRF, response headers, rate limiting
-  images/       storage sharding, upload processing, grid geometry
+  images/       storage sharding, upload processing, grid geometry, fingerprints
   routes/       auth, maps, admin, files, static
   views/        server-rendered components
 cli/user.ts     account management

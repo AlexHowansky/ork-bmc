@@ -14,14 +14,31 @@ export interface MapFormValues {
   gridHeight: string;
 }
 
+export type MapFormMode = 'create' | 'edit' | 'confirm';
+
+/**
+ * An upload that has been processed and written but not yet committed to a map,
+ * because its fingerprint matched something already in the library.
+ */
+export interface StagedUpload {
+  uuid: string;
+  imageWidth: number;
+  imageHeight: number;
+  gridSize: number | null;
+  gridWidth: number | null;
+  gridHeight: number | null;
+}
+
 export interface MapFormProps {
-  mode: 'create' | 'edit';
+  mode: MapFormMode;
   action: string;
   csrfToken: string;
   values: MapFormValues;
   errors?: Record<string, string> | undefined;
   /** On edit, shows the current image and its measured dimensions. */
   existing?: { uuid: string; imageWidth: number; imageHeight: number; gridSource: string } | undefined;
+  /** On confirm, the staged upload the form will commit. */
+  staged?: StagedUpload | undefined;
 }
 
 const Field: FC<{
@@ -62,14 +79,48 @@ const Field: FC<{
   </div>
 );
 
-export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, errors = {}, existing }) => (
+/** The grid the staged image was already processed against; not editable here. */
+const StagedGrid: FC<{ staged: StagedUpload }> = ({ staged }) =>
+  staged.gridSize === null ? (
+    <p class="mt-1 text-sm text-stone-600 dark:text-stone-400">
+      No grid was recorded for this image. You can add one after saving.
+    </p>
+  ) : (
+    <p class="mt-1 text-sm text-stone-600 dark:text-stone-400">
+      {staged.gridSize} px per square, {staged.gridWidth} across × {staged.gridHeight} down. The image has already
+      been processed to fit those squares, so the grid is edited from the map itself once this is saved.
+    </p>
+  );
+
+export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, errors = {}, existing, staged }) => (
   <form method="post" action={action} enctype="multipart/form-data" class="space-y-8">
     <CsrfInput token={csrfToken} />
+    {/* Names the staged upload this submission commits. Server-side it is only
+        honoured for the admin who staged it, and only until it ages out. */}
+    {staged && <input type="hidden" name="pendingUuid" value={staged.uuid} />}
 
     <div class={`p-6 ${card}`}>
       <h2 class="text-lg font-semibold">Image</h2>
 
-      {mode === 'create' ? (
+      {mode === 'confirm' && staged ? (
+        <div class="mt-4 flex flex-wrap items-center gap-4">
+          <img
+            src={`/i/pending/${staged.uuid}/thumb`}
+            alt="The image you are uploading"
+            width="120"
+            height="120"
+            class="rounded-lg border border-stone-200 object-contain dark:border-stone-700"
+          />
+          <div class="text-sm text-stone-600 dark:text-stone-400">
+            <p>
+              {staged.imageWidth} × {staged.imageHeight} pixels
+            </p>
+            <p class="mt-1">
+              This file has been processed and is waiting to be saved. Nothing has joined the library yet.
+            </p>
+          </div>
+        </div>
+      ) : mode === 'create' ? (
         <div class="mt-4">
           <label for="image" class={label}>
             Map file <span class="text-red-600 dark:text-red-400">*</span>
@@ -148,6 +199,12 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
       </div>
     </div>
 
+    {mode === 'confirm' && staged ? (
+      <div class={`p-6 ${card}`}>
+        <h2 class="text-lg font-semibold">Grid</h2>
+        <StagedGrid staged={staged} />
+      </div>
+    ) : (
     <div class={`p-6 ${card}`}>
       <h2 class="text-lg font-semibold">Grid</h2>
       <p class="mt-1 text-sm text-stone-600 dark:text-stone-400">
@@ -195,14 +252,23 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
         blank until you fill them in.
       </p>
     </div>
+    )}
 
     <div class="flex items-center gap-3">
       <button type="submit" class={button.primary}>
-        {mode === 'create' ? 'Upload map' : 'Save changes'}
+        {mode === 'edit' ? 'Save changes' : mode === 'confirm' ? 'Save this map' : 'Upload map'}
       </button>
-      <a href={existing ? `/maps/${existing.uuid}` : '/maps'} class={button.secondary}>
-        Cancel
-      </a>
+      {mode === 'confirm' ? (
+        // `formnovalidate` so discarding is not blocked by the required name
+        // field, which the admin has no reason to fill in on the way out.
+        <button type="submit" name="action" value="discard" formnovalidate class={button.danger}>
+          Discard this upload
+        </button>
+      ) : (
+        <a href={existing ? `/maps/${existing.uuid}` : '/maps'} class={button.secondary}>
+          Cancel
+        </a>
+      )}
     </div>
   </form>
 );

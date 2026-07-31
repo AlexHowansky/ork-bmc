@@ -4,8 +4,10 @@
  * `maps` holds the canonical columns; `maps_fts` is a search index kept in step
  * by triggers. Searches read the index and join back for the full row.
  */
+import { config } from '../config.ts';
 import { db } from '../db/index.ts';
 import { conflict, notFound, validationFailed } from '../errors.ts';
+import { hammingDistance, isValidFingerprint } from '../images/fingerprint.ts';
 import type { GridSource } from '../images/grid.ts';
 
 export interface MapRecord {
@@ -21,6 +23,8 @@ export interface MapRecord {
   fileSize: number;
   gridSource: GridSource;
   upscaleFactor: number;
+  /** Null on maps uploaded before fingerprinting existed; those never match. */
+  fingerprint: string | null;
   originalFilename: string | null;
   uploadedBy: string | null;
   createdAt: number;
@@ -40,6 +44,7 @@ interface MapRow {
   file_size: number;
   grid_source: GridSource;
   upscale_factor: number;
+  fingerprint: string | null;
   original_filename: string | null;
   uploaded_by: string | null;
   created_at: number;
@@ -59,6 +64,7 @@ const toMap = (row: MapRow): MapRecord => ({
   fileSize: row.file_size,
   gridSource: row.grid_source,
   upscaleFactor: row.upscale_factor,
+  fingerprint: row.fingerprint,
   originalFilename: row.original_filename,
   uploadedBy: row.uploaded_by,
   createdAt: row.created_at,
@@ -262,6 +268,53 @@ export function countMaps(): number {
   return (db.query('SELECT COUNT(*) AS n FROM maps').get() as { n: number }).n;
 }
 
+export interface SimilarMap {
+  map: MapRecord;
+  /** Bits of the 64-bit fingerprint that differ; 0 is an exact visual match. */
+  distance: number;
+}
+
+/**
+ * Finds the maps whose fingerprint is close enough to be the same picture.
+ *
+ * Every candidate is scored in JavaScript, because SQLite has no `popcount` and
+ * a Hamming distance is not something an index can answer — there is no ordering
+ * of hashes under which near-matches are adjacent. Only `uuid` and `fingerprint`
+ * are read for the scan, and full rows are fetched for the handful that survive.
+ *
+ * That makes this linear in the size of the library, which is the right trade
+ * for a personal map collection: 100 000 maps would still be a couple of
+ * milliseconds of comparisons on an upload that already spent far longer in
+ * sharp. If it ever stops being, the usual next step is to bucket by a few bits
+ * of the hash and only score the buckets within reach of the threshold.
+ */
+export function findSimilarMaps(
+  fingerprint: string,
+  options: { maxDistance?: number; excludeUuid?: string; limit?: number } = {},
+): SimilarMap[] {
+  if (!isValidFingerprint(fingerprint)) {
+    throw new Error('findSimilarMaps needs a fingerprint in the form perceptualHash returns');
+  }
+
+  const maxDistance = options.maxDistance ?? config.fingerprint.maxDistance;
+  const limit = options.limit ?? 20;
+
+  const candidates = db
+    .query('SELECT uuid, fingerprint FROM maps WHERE fingerprint IS NOT NULL')
+    .all() as { uuid: string; fingerprint: string }[];
+
+  return candidates
+    .filter((row) => row.uuid !== options.excludeUuid && isValidFingerprint(row.fingerprint))
+    .map((row) => ({ uuid: row.uuid, distance: hammingDistance(fingerprint, row.fingerprint) }))
+    .filter((scored) => scored.distance <= maxDistance)
+    // Nearest first, so the caller can treat the head as the best match — it is
+    // the name the upload form is pre-filled from.
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, limit)
+    .map((scored) => ({ map: findMap(scored.uuid), distance: scored.distance }))
+    .filter((similar): similar is SimilarMap => similar.map !== null);
+}
+
 export interface MapInput {
   name: string;
   variant: string;
@@ -278,6 +331,8 @@ export interface UpdatedImage {
   imageWidth: number;
   imageHeight: number;
   fileSize: number;
+  /** Re-taken from the new pixels, so the column always describes what is on disk. */
+  fingerprint: string;
 }
 
 export interface CreateMapInput extends MapInput {
@@ -285,6 +340,7 @@ export interface CreateMapInput extends MapInput {
   imageWidth: number;
   imageHeight: number;
   fileSize: number;
+  fingerprint: string | null;
   originalFilename: string | null;
   uploadedBy: string | null;
 }
@@ -310,10 +366,10 @@ export function createMap(input: CreateMapInput): MapRecord {
     db.query(
       `INSERT INTO maps (uuid, name, variant, tags, grid_size, grid_width, grid_height,
                          image_width, image_height, file_size, grid_source, upscale_factor,
-                         original_filename, uploaded_by, created_at, updated_at)
+                         fingerprint, original_filename, uploaded_by, created_at, updated_at)
        VALUES ($uuid, $name, $variant, $tags, $gridSize, $gridWidth, $gridHeight,
                $imageWidth, $imageHeight, $fileSize, $gridSource, $upscaleFactor,
-               $originalFilename, $uploadedBy, $createdAt, $updatedAt)`,
+               $fingerprint, $originalFilename, $uploadedBy, $createdAt, $updatedAt)`,
     ).run({
       $uuid: input.uuid,
       $name: input.name,
@@ -327,6 +383,7 @@ export function createMap(input: CreateMapInput): MapRecord {
       $fileSize: input.fileSize,
       $gridSource: input.gridSource,
       $upscaleFactor: input.upscaleFactor,
+      $fingerprint: input.fingerprint,
       $originalFilename: input.originalFilename,
       $uploadedBy: input.uploadedBy,
       $createdAt: now,
@@ -357,7 +414,7 @@ export function updateMap(uuid: string, input: MapInput, image?: UpdatedImage): 
               grid_size = $gridSize, grid_width = $gridWidth, grid_height = $gridHeight,
               grid_source = $gridSource, upscale_factor = $upscaleFactor,
               image_width = $imageWidth, image_height = $imageHeight, file_size = $fileSize,
-              updated_at = $updatedAt
+              fingerprint = $fingerprint, updated_at = $updatedAt
         WHERE uuid = $uuid`,
     ).run({
       $uuid: uuid,
@@ -372,6 +429,7 @@ export function updateMap(uuid: string, input: MapInput, image?: UpdatedImage): 
       $imageWidth: image?.imageWidth ?? current.imageWidth,
       $imageHeight: image?.imageHeight ?? current.imageHeight,
       $fileSize: image?.fileSize ?? current.fileSize,
+      $fingerprint: image?.fingerprint ?? current.fingerprint,
       $updatedAt: Date.now(),
     });
   } catch (error) {
