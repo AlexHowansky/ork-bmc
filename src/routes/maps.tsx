@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import type { FC } from 'hono/jsx';
 
 import { config } from '../config.ts';
+import { carriesSearch, forgetSearch, rememberedSearch, rememberSearch } from '../searchMemory.ts';
 import { FORMAT_LABELS } from '../images/process.ts';
 import { notFound } from '../errors.ts';
 import {
@@ -48,7 +49,7 @@ const EmptyState: FC<{ hasFilters: boolean; isAdmin: boolean }> = ({ hasFilters,
     </p>
     <div class="mt-6 flex justify-center gap-3">
       {hasFilters && (
-        <a href="/maps" class={button.secondary}>
+        <a href="/maps?clear=1" class={button.secondary}>
           Clear search
         </a>
       )}
@@ -61,17 +62,67 @@ const EmptyState: FC<{ hasFilters: boolean; isAdmin: boolean }> = ({ hasFilters,
   </div>
 );
 
+interface Criteria {
+  text: string;
+  rawTags: string;
+  tagMode: TagMode;
+  sort: SortOrder;
+}
+
+/**
+ * Validates a search from wherever it came — the query string on this request,
+ * or the one remembered from the last.
+ *
+ * One reader for both, so a value restored from the cookie is held to exactly
+ * the same standard as one that was just typed, and neither can carry anything
+ * unvalidated into a query or a redirect.
+ */
+function readCriteria(get: (name: string) => string | undefined): Criteria {
+  const modeParam = get('mode') ?? 'any';
+  const sortParam = get('sort') ?? 'newest';
+
+  return {
+    text: (get('q') ?? '').trim().slice(0, 200),
+    rawTags: (get('tags') ?? '').trim().slice(0, 500),
+    tagMode: isTagMode(modeParam) ? modeParam : 'any',
+    sort: isSortOrder(sortParam) ? sortParam : 'newest',
+  };
+}
+
+/** The canonical query string for a search: only what differs from the default. */
+function toQuery({ text, rawTags, tagMode, sort }: Criteria): Record<string, string> {
+  const query: Record<string, string> = {};
+  if (text) query['q'] = text;
+  if (rawTags) query['tags'] = rawTags;
+  if (tagMode !== 'any') query['mode'] = tagMode;
+  if (sort !== 'newest') query['sort'] = sort;
+  return query;
+}
+
 mapRoutes.get('/maps', (c) => {
   const user = c.get('user')!;
 
-  const text = (c.req.query('q') ?? '').trim().slice(0, 200);
-  const rawTags = (c.req.query('tags') ?? '').trim().slice(0, 500);
-  const modeParam = c.req.query('mode') ?? 'any';
-  const sortParam = c.req.query('sort') ?? 'newest';
-  const pageParam = Number(c.req.query('page') ?? '1');
+  // Clearing has to be an act of its own: simply arriving at the listing is what
+  // restores the last search, so it cannot also be what discards it.
+  if (c.req.query('clear') !== undefined) {
+    forgetSearch(c);
+    return c.redirect('/maps', 302);
+  }
 
-  const tagMode: TagMode = isTagMode(modeParam) ? modeParam : 'any';
-  const sort: SortOrder = isSortOrder(sortParam) ? sortParam : 'newest';
+  // No search of its own — a nav link, or a return trip from a map. Put the last
+  // one back, and in the URL rather than silently, so what is on screen is
+  // always what the address says.
+  if (!carriesSearch(c)) {
+    const restored = toQuery(readCriteria((name) => new URLSearchParams(rememberedSearch(c)).get(name) ?? undefined));
+    if (Object.keys(restored).length > 0) {
+      return c.redirect(`/maps?${new URLSearchParams(restored).toString()}`, 302);
+    }
+  }
+
+  const criteria = readCriteria((name) => c.req.query(name));
+  const { text, rawTags, tagMode, sort } = criteria;
+
+  const pageParam = Number(c.req.query('page') ?? '1');
   const currentPage = Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1;
 
   // Reuse the same normalisation the upload form applies, so searching for
@@ -89,11 +140,10 @@ mapRoutes.get('/maps', (c) => {
 
   const hasFilters = text !== '' || tags.length > 0;
 
-  const query: Record<string, string> = {};
-  if (text) query['q'] = text;
-  if (rawTags) query['tags'] = rawTags;
-  if (tagMode !== 'any') query['mode'] = tagMode;
-  if (sort !== 'newest') query['sort'] = sort;
+  const query = toQuery(criteria);
+  // Remembered from the canonical form, so what comes back is what this page
+  // would have been anyway. An empty query is a search of nothing, which forgets.
+  rememberSearch(c, new URLSearchParams(query).toString());
 
   return page(
     c,
@@ -107,7 +157,7 @@ mapRoutes.get('/maps', (c) => {
         tagMode={tagMode}
         sort={sort}
         popularTags={listAllTags().slice(0, 15)}
-        hasFilters={hasFilters}
+        hasQuery={Object.keys(query).length > 0}
       />
 
       {results.maps.length === 0 ? (

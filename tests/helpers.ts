@@ -30,6 +30,14 @@ export class Client {
     return { Cookie: [...this.cookies].map(([k, v]) => `${k}=${v}`).join('; ') };
   }
 
+  /**
+   * Plants a cookie directly, for tests that need to present one the app would
+   * never write — a tampered search memory, say.
+   */
+  setCookie(name: string, value: string): void {
+    this.cookies.set(name, value);
+  }
+
   private absorb(response: Response): void {
     for (const raw of response.headers.getSetCookie()) {
       const [pair] = raw.split(';');
@@ -70,9 +78,21 @@ export class Client {
     return response;
   }
 
-  /** Reads the CSRF token out of a rendered page. */
+  /**
+   * Reads the CSRF token out of a rendered page.
+   *
+   * Follows one redirect, as a browser would: `/maps` bounces to the remembered
+   * search once one has been run, and a token has to come from the page that is
+   * actually rendered. `get` itself stays literal, because most of the suite is
+   * asserting on the redirects themselves.
+   */
   async csrfToken(path = '/maps'): Promise<string> {
-    const html = await (await this.get(path)).text();
+    let response = await this.get(path);
+
+    const location = response.status === 302 ? response.headers.get('location') : null;
+    if (location) response = await this.get(location);
+
+    const html = await response.text();
     return /name="_csrf" value="([^"]+)"/.exec(html)?.[1] ?? '';
   }
 

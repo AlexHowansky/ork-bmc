@@ -2,7 +2,7 @@
  * End-to-end HTTP behaviour: the access-control matrix, CSRF enforcement,
  * search, and the guarantee that full-resolution maps need authentication.
  */
-import { beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import sharp from 'sharp';
 
 import { assetVersion, PUBLIC_DIR } from '../src/assets.ts';
@@ -183,6 +183,12 @@ describe('login', () => {
 });
 
 describe('search', () => {
+  // Searching leaves the search remembered, which makes a later bare GET /maps a
+  // redirect. Cleaned up here so no test downstream depends on the order.
+  afterAll(async () => {
+    await admin.get('/maps?clear=1');
+  });
+
   const search = async (query: string): Promise<string> => (await admin.get(`/maps?${query}`)).text();
   const matches = (html: string, name: string): boolean => html.includes(name);
 
@@ -216,6 +222,102 @@ describe('search', () => {
   test('an unmatched search reports an empty state rather than an error', async () => {
     const html = await search('q=definitelynosuchmapname');
     expect(html).toContain('No maps match that search');
+  });
+});
+
+describe('remembered search', () => {
+  /** Its own session throughout, so nothing here leaks into another test. */
+  let browser: Client;
+
+  beforeAll(async () => {
+    browser = await signedInAs('viewer');
+  });
+
+  test('a search survives leaving the listing and coming back', async () => {
+    expect((await browser.get('/maps?q=fixture+river&sort=name')).status).toBe(200);
+
+    // The nav link, or any other way back to the listing.
+    const returned = await browser.get('/maps');
+    expect(returned.status).toBe(302);
+    expect(returned.headers.get('location')).toBe('/maps?q=fixture+river&sort=name');
+
+    // Restored into the URL, not applied invisibly: what is on screen is what
+    // the address says, and the page itself renders the filters.
+    const html = await (await browser.get(returned.headers.get('location')!)).text();
+    expect(html).toContain('value="fixture river"');
+  });
+
+  test('Clear discards it, and a bare listing then stays bare', async () => {
+    await browser.get('/maps?q=fixture+river');
+
+    const cleared = await browser.get('/maps?clear=1');
+    expect(cleared.status).toBe(302);
+    expect(cleared.headers.get('location')).toBe('/maps');
+
+    expect((await browser.get('/maps')).status).toBe(200);
+  });
+
+  test('the Clear control points at clearing, not at the bare listing', async () => {
+    const html = await (await browser.get('/maps?q=fixture')).text();
+    // A plain /maps link would only restore the search it was meant to discard.
+    expect(html).toContain('href="/maps?clear=1"');
+  });
+
+  test('a sort on its own is remembered, and can still be cleared', async () => {
+    // `hasFilters` is false here — nothing is filtered — but something is
+    // applied, so the way out has to be offered all the same.
+    const html = await (await browser.get('/maps?sort=name')).text();
+    expect(html).toContain('href="/maps?clear=1"');
+
+    expect((await browser.get('/maps')).headers.get('location')).toBe('/maps?sort=name');
+    await browser.get('/maps?clear=1');
+  });
+
+  test('searching for nothing forgets the last search', async () => {
+    await browser.get('/maps?q=fixture+river');
+
+    // What the form posts when every field has been emptied.
+    expect((await browser.get('/maps?q=&tags=&mode=any&sort=newest')).status).toBe(200);
+    expect((await browser.get('/maps')).status).toBe(200);
+  });
+
+  test('signing out forgets it, so the next person starts from the whole library', async () => {
+    const { email, password } = await makeUser('viewer');
+    const client = new Client();
+    await client.login(email, password);
+
+    await client.get('/maps?q=fixture+river');
+    expect((await client.get('/maps')).status).toBe(302);
+
+    await client.post('/logout', new URLSearchParams({ _csrf: await client.csrfToken() }));
+    await client.login(email, password);
+
+    expect((await client.get('/maps')).status).toBe(200);
+  });
+
+  test('a tampered cookie cannot smuggle anything into the redirect', async () => {
+    const client = await signedInAs('viewer');
+
+    // Header injection, an unknown sort, an unknown mode, and an over-long term.
+    client.setCookie(
+      'bm_search',
+      `q=${encodeURIComponent('evil\r\nX-Injected: 1')}&sort=../../etc&mode=weird&page=9`,
+    );
+
+    const restored = await client.get('/maps');
+    const location = restored.headers.get('location') ?? '';
+
+    expect(location).not.toContain('\r');
+    expect(location).not.toContain('\n');
+    // Only the text survives, percent-encoded; the invalid values fall back to
+    // the defaults, which are omitted from a canonical query altogether.
+    expect(location).toStartWith('/maps?q=');
+    expect(location).not.toContain('sort=');
+    expect(location).not.toContain('mode=');
+    expect(location).not.toContain('page=');
+
+    // And the page it lands on renders normally rather than erroring.
+    expect((await client.get(location)).status).toBe(200);
   });
 });
 

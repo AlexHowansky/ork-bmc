@@ -13,6 +13,7 @@ import {
   sessionCookieOptions,
 } from '../auth/session.ts';
 import { config } from '../config.ts';
+import { forgetSearch } from '../searchMemory.ts';
 import { findUserByEmail, normaliseEmail } from '../models/users.ts';
 import { CsrfInput } from '../views/Layout.tsx';
 import { clientIp, consumeToken, resetBucket } from '../security/ratelimit.ts';
@@ -193,6 +194,9 @@ authRoutes.post('/logout', (c) => {
   }
 
   deleteCookie(c, SESSION_COOKIE, { path: '/', secure: config.cookieSecure });
+  // The remembered search belongs to the session that ran it, so it goes too:
+  // the next person at this browser starts from the whole library.
+  forgetSearch(c);
   setFlash(c, { kind: 'info', message: 'You have been signed out.' });
 
   return c.redirect('/login', 302);

@@ -80,6 +80,12 @@ if uploads must be stored bit-for-bit. Each map records the format it was
 stored in, so changing these settings affects new uploads only; maps already in
 the library keep their files and are still served as what they are.
 
+**Searching.** The last search is remembered — filters, tag matching and sort —
+and re-applied whenever the listing is opened without a query of its own, so
+opening a map and coming back does not cost you the search. It is restored into
+the address bar rather than applied invisibly, so what is on screen is always
+what the URL says. *Clear* discards it, and so does signing out.
+
 **Grid geometry.** If the file name ends in square counts — `Forest Road
 40x30.png` — they are read into the grid fields on upload and left out of the
 derived name. Numbers too large to be a grid are ignored, so a file named after

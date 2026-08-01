@@ -55,6 +55,11 @@ bun run db:migrate
   the format from the row — never `config.image.format`. `deleteImage` is the
   deliberate exception: it sweeps every extension so a format change cannot
   strand a file.
+- **`GET /maps` can answer with a 302.** The last search is remembered in the
+  `bm_search` cookie, so arriving at the listing with no query of its own
+  restores it — see `src/searchMemory.ts`. Clearing is `/maps?clear=1`, never a
+  bare `/maps`, which would only put the search back. Anything asserting a 200
+  from `/maps` has to run before a search or after a clear.
 - **Adding a route makes it private by default.** Anything reachable while
   signed out must be listed in `PUBLIC_PATHS` in `auth/middleware.ts`.
 - **A successful upload does not always redirect.** When the new image

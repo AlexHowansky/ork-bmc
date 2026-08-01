@@ -11,14 +11,18 @@ export interface SearchBarProps {
   sort: SortOrder;
   /** Most-used tags, offered as one-click shortcuts. */
   popularTags: { tag: string; count: number }[];
-  hasFilters: boolean;
+  /**
+   * Whether anything at all is applied — including a sort, which filters nothing
+   * but is still remembered, and so still needs a way back out.
+   */
+  hasQuery: boolean;
 }
 
 const radioClass =
   'h-4 w-4 border-stone-300 text-amber-600 focus-visible:outline-2 focus-visible:outline-offset-2 ' +
   'focus-visible:outline-amber-600 dark:border-stone-600';
 
-export const SearchBar: FC<SearchBarProps> = ({ text, tags, tagMode, sort, popularTags, hasFilters }) => (
+export const SearchBar: FC<SearchBarProps> = ({ text, tags, tagMode, sort, popularTags, hasQuery }) => (
   <div class={`p-4 sm:p-6 ${card}`}>
     {/* GET so a search is a shareable, bookmarkable URL. */}
     <form method="get" action="/maps" class="space-y-4">
@@ -88,8 +92,10 @@ export const SearchBar: FC<SearchBarProps> = ({ text, tags, tagMode, sort, popul
           <button type="submit" class={button.primary}>
             Search
           </button>
-          {hasFilters && (
-            <a href="/maps" class={button.secondary}>
+          {hasQuery && (
+            // `clear` rather than a bare /maps, which would only restore the
+            // search this is meant to be getting rid of.
+            <a href="/maps?clear=1" class={button.secondary}>
               Clear
             </a>
           )}
