@@ -43,8 +43,10 @@
   }
 
   // Mirrors `gridFromFilename` in src/images/grid.ts — including the bounds,
-  // which are what stop "Riverbank 1920x1080.png" being read as a grid.
-  var GRID_PATTERN = /(?<![\d.])(\d{1,4})\s*[xX\u00d7]\s*(\d{1,4})(?![\d.])/;
+  // which are what stop "Riverbank 1920x1080.png" being read as a grid, and the
+  // leading capture group in place of a lookbehind: a lookbehind is a parse
+  // error in Safari before 16.4, and would take this whole file with it.
+  var GRID_PATTERN = /(^|[^\d.])(\d{1,4})\s*[xX\u00d7]\s*(\d{1,4})(?![\d.])/;
   var MIN_SQUARES = 3;
   var MAX_SQUARES = 200;
 
@@ -54,8 +56,8 @@
     var match = GRID_PATTERN.exec(stem);
     if (!match) return null;
 
-    var width = Number(match[1]);
-    var height = Number(match[2]);
+    var width = Number(match[2]);
+    var height = Number(match[3]);
     var plausible = function (count) {
       return count >= MIN_SQUARES && count <= MAX_SQUARES;
     };
@@ -71,7 +73,7 @@
     // Square counts belong to the grid fields, so they are not repeated in the
     // name — unless they were the whole of it.
     if (gridFromFilename(stem)) {
-      var stripped = stem.replace(GRID_PATTERN, ' ').replace(/\(\s*\)|\[\s*\]|\{\s*\}/g, ' ');
+      var stripped = stem.replace(GRID_PATTERN, '$1 ').replace(/\(\s*\)|\[\s*\]|\{\s*\}/g, ' ');
       if (stripped.replace(/^\s+|\s+$/g, '') !== '') stem = stripped;
     }
 

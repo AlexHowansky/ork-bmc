@@ -5,6 +5,7 @@
 import { beforeAll, describe, expect, test } from 'bun:test';
 import sharp from 'sharp';
 
+import { assetVersion, PUBLIC_DIR } from '../src/assets.ts';
 import { config } from '../src/config.ts';
 import { hammingDistance } from '../src/images/fingerprint.ts';
 import { FORMAT_LABELS, FORMAT_MIME_TYPES } from '../src/images/process.ts';
@@ -796,6 +797,43 @@ describe('image delivery', () => {
   test('rejects a path that is not a UUID', async () => {
     for (const bad of ['../../../etc/passwd', 'not-a-uuid', '00000000-0000-4000-8000-000000000000']) {
       expect((await admin.get(`/i/${encodeURIComponent(bad)}/full`)).status).toBe(404);
+    }
+  });
+});
+
+describe('static assets', () => {
+  test('are linked with a stamp, so an edited file is not served from cache', async () => {
+    const html = await (await admin.get('/maps/new')).text();
+
+    const script = html.match(/<script src="\/app\.js\?v=([^"]+)"/);
+    const style = html.match(/<link rel="stylesheet" href="\/app\.css\?v=([^"]+)"/);
+    expect(script?.[1]).toBeTruthy();
+    expect(style?.[1]).toBeTruthy();
+
+    // The stamp follows the file, so touching it changes the URL the browser
+    // asks for — which is the whole point of stamping it.
+    expect(script![1]).toBe(assetVersion('app.js'));
+    expect(style![1]).toBe(assetVersion('app.css'));
+  });
+
+  test('are still served, and still public, with the stamp on the URL', async () => {
+    for (const path of ['/app.js', '/app.css']) {
+      const stamped = await anonymous.get(`${path}?v=${assetVersion(path === '/app.js' ? 'app.js' : 'app.css')}`);
+      expect(stamped.status).toBe(200);
+      expect(stamped.headers.get('cache-control')).toContain('max-age=86400');
+    }
+  });
+
+  test('the stamp changes when the file does', async () => {
+    const before = assetVersion('app.js');
+
+    const path = `${PUBLIC_DIR}/app.js`;
+    const original = await Bun.file(path).text();
+    try {
+      await Bun.write(path, `${original}\n// touched by a test\n`);
+      expect(assetVersion('app.js')).not.toBe(before);
+    } finally {
+      await Bun.write(path, original);
     }
   });
 });

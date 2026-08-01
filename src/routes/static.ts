@@ -8,12 +8,11 @@
 import { Hono } from 'hono';
 import { join } from 'node:path';
 
+import { PUBLIC_DIR } from '../assets.ts';
 import { notFound } from '../errors.ts';
 import type { AppEnv } from '../types.ts';
 
 export const staticRoutes = new Hono<AppEnv>();
-
-const PUBLIC_DIR = join(import.meta.dir, '..', '..', 'public');
 
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
 <rect width="32" height="32" rx="6" fill="#d97706"/>
@@ -31,14 +30,17 @@ staticRoutes.get('/app.css', async (c) => {
   }
 
   c.header('Content-Type', 'text/css; charset=utf-8');
-  c.header('Cache-Control', 'public, max-age=300');
+  // Held for a day because the URL carries the file's stamp (see src/assets.ts):
+  // a rebuilt stylesheet is a different URL and is fetched immediately.
+  c.header('Cache-Control', 'public, max-age=86400');
   return c.body(await file.arrayBuffer());
 });
 
 staticRoutes.get('/app.js', async (c) => {
   const file = Bun.file(join(PUBLIC_DIR, 'app.js'));
   c.header('Content-Type', 'text/javascript; charset=utf-8');
-  c.header('Cache-Control', 'public, max-age=3600');
+  // Same bargain as the stylesheet: long-lived, but only for this exact version.
+  c.header('Cache-Control', 'public, max-age=86400');
   return c.body(await file.arrayBuffer());
 });
 

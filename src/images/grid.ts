@@ -134,8 +134,13 @@ const MAX_FILENAME_SQUARES = 200;
  * Anchored on non-digit boundaries so `1140x30` is not read as `40x30`, and the
  * separator covers what people actually type: `x`, `X`, and the `×` sign a Mac
  * will happily insert. Any brackets around it are left to the caller to tidy.
+ *
+ * The leading boundary is a captured group rather than a lookbehind, because
+ * `public/app.js` carries a copy of this and a lookbehind is a *parse* error in
+ * Safari before 16.4 — which would take the whole script down, not just this
+ * feature. Anything replacing the match must put `$1` back.
  */
-export const FILENAME_GRID_PATTERN = /(?<![\d.])(\d{1,4})\s*[xX×]\s*(\d{1,4})(?![\d.])/;
+export const FILENAME_GRID_PATTERN = /(^|[^\d.])(\d{1,4})\s*[xX×]\s*(\d{1,4})(?![\d.])/;
 
 /**
  * Reads square counts out of a filename, for use as form defaults.
@@ -152,10 +157,10 @@ export function gridFromFilename(filename: string): { gridWidth: number; gridHei
   const stem = base.replace(/\.[^.]+$/, '') || base;
 
   const match = FILENAME_GRID_PATTERN.exec(stem);
-  if (!match?.[1] || !match[2]) return null;
+  if (!match?.[2] || !match[3]) return null;
 
-  const gridWidth = Number(match[1]);
-  const gridHeight = Number(match[2]);
+  const gridWidth = Number(match[2]);
+  const gridHeight = Number(match[3]);
 
   const plausible = (count: number): boolean =>
     Number.isInteger(count) && count >= MIN_FILENAME_SQUARES && count <= MAX_FILENAME_SQUARES;

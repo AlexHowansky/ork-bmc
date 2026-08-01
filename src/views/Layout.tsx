@@ -5,6 +5,7 @@ import { raw } from 'hono/html';
 import { CSRF_FIELD } from '../security/csrf.ts';
 import type { Theme } from '../types.ts';
 import type { Role } from '../models/users.ts';
+import { assetUrl } from '../assets.ts';
 import { button } from './ui.ts';
 
 export interface Flash {
@@ -136,9 +137,9 @@ export const Layout: FC<PropsWithChildren<LayoutProps>> = ({
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <meta name="robots" content="noindex, nofollow" />
       <title>{title} · Battle Mapper</title>
-      <link rel="stylesheet" href="/app.css" />
+      <link rel="stylesheet" href={assetUrl('app.css')} />
       <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-      <script src="/app.js" defer></script>
+      <script src={assetUrl('app.js')} defer></script>
       {gridOverlay && <style nonce={nonce}>{raw(gridOverlayCss(gridOverlay))}</style>}
     </head>
     <body class="min-h-screen bg-stone-50 text-stone-900 antialiased dark:bg-stone-950 dark:text-stone-100">

@@ -94,7 +94,7 @@ function withoutGridToken(stem: string): string {
   if (!gridFromFilename(stem)) return stem;
 
   const stripped = stem
-    .replace(FILENAME_GRID_PATTERN, ' ')
+    .replace(FILENAME_GRID_PATTERN, '$1 ')
     // Whatever was wrapped around it is now empty.
     .replace(/\(\s*\)|\[\s*\]|\{\s*\}/g, ' ');
 
