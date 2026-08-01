@@ -653,6 +653,49 @@ describe('duplicate detection', () => {
     expect(html).not.toContain('Something Else Entirely');
   });
 
+  test('the matched map’s tags are offered, so a variant stays findable with its siblings', async () => {
+    const image = await makeMapPng(400, 300, 50);
+    const first = await upload(admin, image, { name: 'Tagged Ruins', tags: 'ruins desert camp' });
+    expect(first.status).toBe(302);
+
+    const held = await upload(admin, image, { name: 'Tagged Ruins' });
+    const html = await held.text();
+
+    // Offered in the field, before anything is committed, so they can be edited.
+    expect(html).toContain('value="camp desert ruins"');
+    expect(html).toContain('Copied from the map this matched');
+
+    // And they follow the variant into the library when it is saved.
+    const staged = stagedUuidFrom(html);
+    const saved = await confirm(admin, staged, {
+      name: 'Tagged Ruins',
+      variant: 'night',
+      tags: 'camp desert ruins',
+    });
+    expect(saved.status).toBe(302);
+    expect(findMap(staged)?.tags).toEqual(['camp', 'desert', 'ruins']);
+  });
+
+  test('tags already typed are kept and merged with the matched map’s', async () => {
+    const image = await makeMapPng(400, 300, 50);
+    await upload(admin, image, { name: 'Merged Tags', tags: 'forest road' });
+
+    const html = await (await upload(admin, image, { name: 'Merged Tags', tags: 'road winter' })).text();
+
+    // The union, de-duplicated and sorted by the same parser the form uses.
+    expect(html).toContain('value="forest road winter"');
+  });
+
+  test('clearing the offered tags is respected rather than re-applied on save', async () => {
+    const image = await makeMapPng(400, 300, 50);
+    await upload(admin, image, { name: 'Cleared Tags', tags: 'swamp' });
+    const staged = stagedUuidFrom(await (await upload(admin, image, { name: 'Cleared Tags' })).text());
+
+    const saved = await confirm(admin, staged, { name: 'Cleared Tags', variant: 'flooded', tags: '' });
+    expect(saved.status).toBe(302);
+    expect(findMap(staged)?.tags).toEqual([]);
+  });
+
   test('the staged image is previewed, and only to the admin who staged it', async () => {
     const image = await makeMapPng(400, 300, 50);
     await upload(admin, image, { name: 'Preview Source' });

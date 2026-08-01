@@ -22,6 +22,7 @@ import {
   parseTagInput,
   updateMap,
   MAX_NAME_LENGTH,
+  MAX_TAGS,
   type MapRecord,
   type SimilarMap,
 } from '../models/maps.ts';
@@ -177,6 +178,23 @@ function chooseGridInput(parsed: ParsedForm, previous?: MapRecord): GridInput {
   return { gridSize: parsed.gridSize, gridWidth: parsed.gridWidth, gridHeight: parsed.gridHeight };
 }
 
+/**
+ * The tags to offer on the duplicate-confirmation form.
+ *
+ * Everything the matched maps carry, plus anything the admin had already typed,
+ * normalised and de-duplicated by the same parser the form uses. They arrive in
+ * the field rather than being applied at save time, so they are visible before
+ * anything is committed and can be edited or emptied like any other value — an
+ * admin who clears the field means it.
+ */
+function tagsFromMatches(typed: string, matches: SimilarMap[]): string {
+  const { tags } = parseTagInput([typed, ...matches.map((match) => match.map.tags.join(' '))].join(' '));
+
+  // The union of several maps' tags can in principle outrun the per-map limit,
+  // and offering a value that validation would then reject helps nobody.
+  return tags.slice(0, MAX_TAGS).join(' ');
+}
+
 /** Explains a resize, or the refusal to do one, in the success flash. */
 function gridNote(grid: ResolvedGrid, width: number, height: number): string {
   if (grid.target) {
@@ -299,6 +317,10 @@ async function createFromUpload(c: Context<AppEnv>, body: Record<string, unknown
         // adding a variant is the path of least resistance.
         name: matches[0]!.map.name,
         variant: '',
+        // Same reasoning for the tags: a new variant of a map already in the
+        // library wants the same tags, and retyping them by hand is how a
+        // variant ends up findable under a different set than its siblings.
+        tags: tagsFromMatches(values.tags, matches),
       });
     }
 

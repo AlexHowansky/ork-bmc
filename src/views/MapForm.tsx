@@ -231,7 +231,11 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
           value={values.tags}
           error={errors['tags']}
           placeholder="forest road camp"
-          hintText="Tags may be letters only. Separate multiple tags by spaces or commas."
+          hintText={
+            mode === 'confirm'
+              ? 'Copied from the map this matched, so its variants stay findable together. Edit or clear them as you like. Tags may be letters only, separated by spaces or commas.'
+              : 'Tags may be letters only. Separate multiple tags by spaces or commas.'
+          }
         />
       </div>
     </div>
