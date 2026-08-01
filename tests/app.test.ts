@@ -54,6 +54,25 @@ const png = { name: 'sunken_temple.png', type: 'image/png' };
 /** The checkbox that CSS uses to hold the full-size map view open. */
 const lightbox = { checked: false };
 
+/** A `<time data-local-time>` as the script sees it. */
+function makeTimestamp(datetime: string | null, text: string) {
+  return {
+    textContent: text,
+    title: '',
+    getAttribute: (name: string) => (name === 'datetime' ? datetime : null),
+  };
+}
+
+/**
+ * Timestamps are restated when the script loads rather than on an event, so the
+ * whole set has to be in place before the import below.
+ */
+const timestamps = [
+  makeTimestamp('2026-07-31T14:23:05.000Z', '2026-07-31 14:23 UTC'),
+  makeTimestamp('not a date at all', '2026-07-31 14:23 UTC'),
+  makeTimestamp(null, 'no datetime attribute'),
+];
+
 beforeAll(async () => {
   const globals = globalThis as Record<string, unknown>;
   globals['document'] = {
@@ -65,6 +84,7 @@ beforeAll(async () => {
       // Otherwise: is there a drop zone on this page at all?
       return zone;
     },
+    querySelectorAll: (selector: string) => (selector === '[data-local-time]' ? timestamps : []),
   };
   globals['Event'] = class {
     constructor(public type: string) {}
@@ -238,6 +258,29 @@ describe('choosing a file', () => {
     expect(fields['name']!.value).toBe('Mine, thanks');
     // The grid was still untouched, so it is still offered.
     expect(fields['gridWidth']!.value).toBe('40');
+  });
+});
+
+describe('timestamps', () => {
+  test('are restated in the reader’s own time zone, keeping UTC on the title', () => {
+    const restated = timestamps[0]!;
+
+    // Not the UTC text any more, and it is the same moment: the suite runs in
+    // whatever zone the machine is set to, so assert the instant, not a string.
+    expect(restated.textContent).not.toBe('2026-07-31 14:23 UTC');
+    expect(restated.title).toBe('2026-07-31 14:23 UTC');
+    expect(new Date('2026-07-31T14:23:05.000Z').toLocaleString(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    })).toBe(restated.textContent);
+  });
+
+  test('are left alone when the attribute is unusable', () => {
+    // A bad value, and a missing one — `new Date(null)` is 1970, not an error,
+    // so restating that would quietly invent a date.
+    expect(timestamps[1]!.textContent).toBe('2026-07-31 14:23 UTC');
+    expect(timestamps[2]!.textContent).toBe('no datetime attribute');
+    expect(timestamps[2]!.title).toBe('');
   });
 });
 

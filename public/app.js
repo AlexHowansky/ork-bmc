@@ -12,6 +12,7 @@
  *     input so the form still posts in exactly the same way.
  *   - Escape closes the full-size map view, which otherwise opens and closes
  *     entirely in CSS.
+ *   - Server-rendered UTC timestamps are restated in the reader's own time zone.
  *
  * Loaded from same-origin so the strict `script-src 'self'` CSP allows it.
  */
@@ -293,4 +294,44 @@
       if (text) text.textContent = LABELS[next];
     }
   });
+
+  // -------------------------------------------------------------------------
+  // Timestamps
+  // -------------------------------------------------------------------------
+
+  /**
+   * Restates server-rendered UTC timestamps in the reader's own time zone.
+   *
+   * The server has no way of knowing that zone, so it renders UTC and marks the
+   * element; the machine reading the page is the one that knows. The UTC text it
+   * replaces moves to the title, so the unambiguous form is still a hover away.
+   *
+   * Runs immediately: the script is deferred, so the document is parsed by now.
+   */
+  function localiseTimestamps() {
+    var elements = document.querySelectorAll('[data-local-time]');
+
+    for (var i = 0; i < elements.length; i++) {
+      var element = elements[i];
+      // Checked before parsing: `new Date(null)` is 1970, not an invalid date,
+      // and silently restating a missing timestamp as 1970 would be worse than
+      // leaving it be.
+      var iso = element.getAttribute('datetime');
+      if (!iso) continue;
+
+      var when = new Date(iso);
+      if (isNaN(when.getTime())) continue;
+
+      try {
+        var local = when.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+        element.title = element.textContent;
+        element.textContent = local;
+      } catch (error) {
+        // An engine without the options form of toLocaleString: leave the UTC
+        // text alone rather than replacing it with something worse.
+      }
+    }
+  }
+
+  localiseTimestamps();
 })();

@@ -141,6 +141,25 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** `2026-07-31 14:23 UTC` — minutes are as fine as "when was this added" needs. */
+function formatUtc(epochMs: number): string {
+  return `${new Date(epochMs).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+}
+
+/**
+ * A moment in time, rendered in UTC because the server has no way of knowing the
+ * reader's zone.
+ *
+ * `public/app.js` rewrites the text in the reader's own zone and keeps the UTC
+ * reading on the title, so the page is right either way — with JavaScript off it
+ * is simply UTC, which is at least unambiguous about which it is.
+ */
+const Timestamp: FC<{ epochMs: number }> = ({ epochMs }) => (
+  <time datetime={new Date(epochMs).toISOString()} data-local-time>
+    {formatUtc(epochMs)}
+  </time>
+);
+
 const GRID_SOURCE_LABEL: Record<string, string> = {
   none: 'Not recorded',
   user: 'Entered manually',
@@ -288,7 +307,9 @@ mapRoutes.get('/maps/:uuid', (c) => {
               <MetadataRow term="File size">{formatBytes(map.fileSize)}</MetadataRow>
               <MetadataRow term="Format">{FORMAT_LABELS[map.format]}</MetadataRow>
               {map.variant && <MetadataRow term="Variant">{map.variant}</MetadataRow>}
-              <MetadataRow term="Added">{new Date(map.createdAt).toISOString().slice(0, 10)}</MetadataRow>
+              <MetadataRow term="Added">
+                <Timestamp epochMs={map.createdAt} />
+              </MetadataRow>
             </dl>
           </div>
 

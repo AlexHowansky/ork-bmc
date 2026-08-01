@@ -594,6 +594,19 @@ describe('map detail', () => {
     expect(html).toContain('id="grid-toggle"');
   });
 
+  test('reports when a map was added to the minute, not just the day', async () => {
+    const map = findMap(mapUuid)!;
+    const html = await (await admin.get(`/maps/${mapUuid}`)).text();
+
+    const iso = new Date(map.createdAt).toISOString();
+    // The machine-readable instant, for app.js to restate in the local zone…
+    expect(html).toContain(`<time datetime="${iso}" data-local-time`);
+    // …and a reading that stands on its own with JavaScript off, saying plainly
+    // which zone it is in.
+    expect(html).toContain(`${iso.slice(0, 16).replace('T', ' ')} UTC`);
+    expect(html).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
+  });
+
   test('the page freeze behind the full-size view survives the CSS build', async () => {
     const css = await Bun.file('public/app.css').text();
     expect(css).toContain('body:has([data-lightbox-toggle]:checked)');
