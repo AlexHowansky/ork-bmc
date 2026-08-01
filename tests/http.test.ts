@@ -5,8 +5,10 @@
 import { beforeAll, describe, expect, test } from 'bun:test';
 import sharp from 'sharp';
 
+import { config } from '../src/config.ts';
 import { hammingDistance } from '../src/images/fingerprint.ts';
-import { fullImagePath, thumbImagePath } from '../src/images/storage.ts';
+import { FORMAT_LABELS, FORMAT_MIME_TYPES } from '../src/images/process.ts';
+import { fullImagePath, STORAGE_EXTENSIONS, thumbImagePath } from '../src/images/storage.ts';
 import { createMap, findMap } from '../src/models/maps.ts';
 import { Client, ensureSchema, makeMapPng, makeUser, signedInAs, uploadForm, uuidFromRedirect } from './helpers.ts';
 
@@ -55,7 +57,7 @@ describe('access control', () => {
       expect(response.status).toBe(302);
       // Critically: no image bytes in the body.
       expect((await response.arrayBuffer()).byteLength).toBeLessThan(2048);
-      expect(response.headers.get('content-type')).not.toBe('image/webp');
+      expect(response.headers.get('content-type')).not.toBe(FORMAT_MIME_TYPES[config.image.format]);
     }
   });
 
@@ -65,7 +67,7 @@ describe('access control', () => {
 
     const image = await viewer.get(`/i/${mapUuid}/full`);
     expect(image.status).toBe(200);
-    expect(image.headers.get('content-type')).toBe('image/webp');
+    expect(image.headers.get('content-type')).toBe(FORMAT_MIME_TYPES[config.image.format]);
   });
 
   test('viewers are refused every write route, not merely denied the buttons', async () => {
@@ -472,6 +474,67 @@ describe('map lifecycle', () => {
   });
 });
 
+/**
+ * Written against `config.image` rather than a hard-coded WEBP, so the same
+ * assertions hold whichever format the suite is run under:
+ * `IMAGE_FORMAT=png bun test` and `IMAGE_FORMAT=jpeg IMAGE_QUALITY=85 bun test`
+ * exercise the other branches of this end to end.
+ */
+describe('storage format', () => {
+  test('one format describes the row, the files, and every response', async () => {
+    const created = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), await makeMapPng(280, 210, 70), { name: 'Storage Format', gridSize: '70' }),
+    );
+    const uuid = uuidFromRedirect(created);
+    const map = findMap(uuid)!;
+    const { format } = config.image;
+
+    expect(map.format).toBe(format);
+    expect(await Bun.file(fullImagePath(uuid, format)).exists()).toBe(true);
+    expect(await Bun.file(thumbImagePath(uuid, format)).exists()).toBe(true);
+    expect((await sharp(fullImagePath(uuid, format)).metadata()).format).toBe(format);
+
+    expect((await admin.get(`/i/${uuid}/full`)).headers.get('content-type')).toBe(FORMAT_MIME_TYPES[format]);
+    expect((await admin.get(`/i/${uuid}/thumb`)).headers.get('content-type')).toBe(FORMAT_MIME_TYPES[format]);
+
+    const download = await admin.get(`/i/${uuid}/download`);
+    expect(download.headers.get('content-disposition')).toContain(`${STORAGE_EXTENSIONS[format]}"`);
+
+    // And the detail page names the format the file actually is.
+    expect(await (await admin.get(`/maps/${uuid}`)).text()).toContain(FORMAT_LABELS[format]);
+  });
+
+  test('an edit that rescales keeps the map in the format it was stored in', async () => {
+    const created = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), await makeMapPng(1000, 1000, 100), { name: 'Storage Format Edit' }),
+    );
+    const uuid = uuidFromRedirect(created);
+    const { format } = findMap(uuid)!;
+
+    await admin.post(
+      `/maps/${uuid}/edit`,
+      new URLSearchParams({
+        _csrf: await admin.csrfToken(),
+        name: 'Storage Format Edit',
+        variant: '',
+        tags: '',
+        gridSize: '',
+        gridWidth: '30',
+        gridHeight: '30',
+      }),
+    );
+
+    const edited = findMap(uuid)!;
+    expect(edited.format).toBe(format);
+    expect(edited.imageWidth).toBe(1020);
+    // Written under the same name, so the rescale did not leave the old file
+    // behind under a different extension.
+    expect((await sharp(fullImagePath(uuid, format)).metadata()).width).toBe(1020);
+  });
+});
+
 describe('map detail', () => {
   test('the map opens full size on click, with no script involved', async () => {
     const html = await (await admin.get(`/maps/${mapUuid}`)).text();
@@ -596,8 +659,8 @@ describe('duplicate detection', () => {
 
     expect(findMap(staged)).toBeNull();
     expect((await admin.get(`/i/pending/${staged}/thumb`)).status).toBe(404);
-    expect(await Bun.file(fullImagePath(staged)).exists()).toBe(false);
-    expect(await Bun.file(thumbImagePath(staged)).exists()).toBe(false);
+    expect(await Bun.file(fullImagePath(staged, config.image.format)).exists()).toBe(false);
+    expect(await Bun.file(thumbImagePath(staged, config.image.format)).exists()).toBe(false);
   });
 
   test('a staged upload belonging to another admin cannot be committed', async () => {
@@ -658,7 +721,9 @@ describe('image delivery', () => {
     expect(disposition).toContain('attachment');
     // Name, then variant, then enough of the map's own identifier that no two
     // maps can land on the same filename.
-    expect(disposition).toContain(`filename="fixture-river-crossing-day-${mapUuid.slice(0, 8)}.webp"`);
+    expect(disposition).toContain(
+      `filename="fixture-river-crossing-day-${mapUuid.slice(0, 8)}${STORAGE_EXTENSIONS[config.image.format]}"`,
+    );
     expect(Number(response.headers.get('content-length'))).toBeGreaterThan(0);
   });
 
@@ -766,6 +831,7 @@ describe('pagination', () => {
         uuid: crypto.randomUUID(),
         name: `Pagination Fixture ${String(i).padStart(2, '0')}`,
         variant: '',
+        format: 'webp',
         tags: [TAG],
         gridSize: null,
         gridWidth: null,

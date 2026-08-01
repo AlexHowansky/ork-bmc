@@ -72,9 +72,13 @@ Changing a password or a role signs that account out everywhere.
 
 ## Using the app
 
-**Uploading.** PNG, JPG, and WEBP are accepted. Every upload is converted to
-**lossless** WEBP, so changing format costs no quality, and is stored under a
-fresh UUID v4. A thumbnail is generated alongside it.
+**Uploading.** PNG, JPG, and WEBP are accepted. Every upload is re-encoded for
+storage and filed under a fresh UUID v4, with a thumbnail alongside it. What it
+is re-encoded to is up to the operator — `IMAGE_FORMAT`, `IMAGE_QUALITY` and
+`IMAGE_LOSSLESS`, defaulting to WEBP at quality 95. Set `IMAGE_LOSSLESS=true`
+if uploads must be stored bit-for-bit. Each map records the format it was
+stored in, so changing these settings affects new uploads only; maps already in
+the library keep their files and are still served as what they are.
 
 **Grid geometry.** If a map has a painted grid, record the pixels per square
 (*grid size*) and how many squares fit across and down. Fill in any one of the
@@ -132,6 +136,9 @@ The settings most worth reviewing:
 | `IMAGE_DIR` | `./data/images` | Where maps are stored. Must be outside `public/`. |
 | `DATABASE_PATH` | `./data/battlemapper.sqlite` | SQLite database file. |
 | `MAX_UPLOAD_BYTES` | `25MB` | Largest accepted upload. Accepts a `KB`/`MB`/`GB` suffix. |
+| `IMAGE_FORMAT` | `webp` | How maps are stored: `webp`, `png` or `jpeg`. New uploads only. |
+| `IMAGE_QUALITY` | `95` | 1–100. JPEG always; WEBP unless lossless; PNG only below 100, as palette quantisation. |
+| `IMAGE_LOSSLESS` | `false` | WEBP only, and the only way to store uploads bit-for-bit. Refused with `jpeg`. |
 | `COOKIE_SECURE` | `true` | Set `false` only when serving over plain HTTP. |
 | `TRUST_PROXY` | `false` | Enable behind a reverse proxy so `X-Forwarded-For` is honoured. |
 | `PAGE_SIZE` | `24` | Maps per page. |

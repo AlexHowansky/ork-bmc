@@ -12,8 +12,21 @@
 import { mkdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { config } from '../config.ts';
+import { config, IMAGE_FORMATS, type ImageFormat } from '../config.ts';
 import { log } from '../log.ts';
+
+/**
+ * What each format is called on disk.
+ *
+ * The extension is cosmetic — nothing globs the image directory and every route
+ * states its own Content-Type — but a directory of files whose names disagree
+ * with their contents is a trap for whoever next looks in there.
+ */
+export const STORAGE_EXTENSIONS: Record<ImageFormat, string> = {
+  webp: '.webp',
+  png: '.png',
+  jpeg: '.jpg',
+};
 
 export const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -41,12 +54,12 @@ export function shardDir(uuid: string): string {
   return join(config.imageDir, shardFor(uuid));
 }
 
-export function fullImagePath(uuid: string): string {
-  return join(shardDir(uuid), `${uuid}.webp`);
+export function fullImagePath(uuid: string, format: ImageFormat): string {
+  return join(shardDir(uuid), `${uuid}${STORAGE_EXTENSIONS[format]}`);
 }
 
-export function thumbImagePath(uuid: string): string {
-  return join(shardDir(uuid), `${uuid}_thumb.webp`);
+export function thumbImagePath(uuid: string, format: ImageFormat): string {
+  return join(shardDir(uuid), `${uuid}_thumb${STORAGE_EXTENSIONS[format]}`);
 }
 
 export async function ensureImageDir(): Promise<void> {
@@ -55,18 +68,31 @@ export async function ensureImageDir(): Promise<void> {
 }
 
 /** Writes the full-resolution image and its thumbnail, creating the shard as needed. */
-export async function storeImage(uuid: string, full: Uint8Array, thumb: Uint8Array): Promise<void> {
+export async function storeImage(
+  uuid: string,
+  full: Uint8Array,
+  thumb: Uint8Array,
+  format: ImageFormat,
+): Promise<void> {
   await mkdir(shardDir(uuid), { recursive: true });
-  await Bun.write(fullImagePath(uuid), full);
-  await Bun.write(thumbImagePath(uuid), thumb);
+  await Bun.write(fullImagePath(uuid, format), full);
+  await Bun.write(thumbImagePath(uuid, format), thumb);
 }
 
 /**
- * Removes both files for a map.
- * Missing files are not an error — the goal is that nothing is left behind.
+ * Removes every file belonging to a map.
+ *
+ * Deliberately blind to the format: it sweeps all of them rather than taking the
+ * one the row claims. A map is deleted precisely when its row is going away, and
+ * a row that disagreed with the disk — because IMAGE_FORMAT changed under a
+ * half-finished write, say — would otherwise leave a file behind with nothing
+ * left to point at it. Missing files are not an error; the goal is that nothing
+ * remains.
  */
 export async function deleteImage(uuid: string): Promise<void> {
-  for (const path of [fullImagePath(uuid), thumbImagePath(uuid)]) {
+  const paths = IMAGE_FORMATS.flatMap((format) => [fullImagePath(uuid, format), thumbImagePath(uuid, format)]);
+
+  for (const path of paths) {
     try {
       await unlink(path);
     } catch (error) {
@@ -79,6 +105,6 @@ export async function deleteImage(uuid: string): Promise<void> {
   }
 }
 
-export function imageFile(uuid: string, variant: 'full' | 'thumb') {
-  return Bun.file(variant === 'full' ? fullImagePath(uuid) : thumbImagePath(uuid));
+export function imageFile(uuid: string, variant: 'full' | 'thumb', format: ImageFormat) {
+  return Bun.file(variant === 'full' ? fullImagePath(uuid, format) : thumbImagePath(uuid, format));
 }

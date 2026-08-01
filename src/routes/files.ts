@@ -9,8 +9,10 @@
 import { Hono, type Context } from 'hono';
 
 import { requireAdmin } from '../auth/middleware.ts';
+import type { ImageFormat } from '../config.ts';
 import { notFound } from '../errors.ts';
-import { imageFile, isValidUuid } from '../images/storage.ts';
+import { FORMAT_MIME_TYPES } from '../images/process.ts';
+import { imageFile, isValidUuid, STORAGE_EXTENSIONS } from '../images/storage.ts';
 import { findMap, type MapRecord } from '../models/maps.ts';
 import { findPendingUpload } from '../models/pendingUploads.ts';
 import type { AppEnv } from '../types.ts';
@@ -26,20 +28,24 @@ fileRoutes.use('/i/pending/*', requireAdmin());
  *
  * The UUID shape is checked before it is ever used to build a path, so a value
  * like `../../etc/passwd` is rejected here rather than being sanitised later.
+ * The row comes back rather than just the UUID because the row is what says
+ * which format the files are in.
  */
-function requireMapUuid(uuid: string): string {
+function requireMap(uuid: string): MapRecord {
   if (!isValidUuid(uuid)) throw notFound('That map does not exist.');
-  if (!findMap(uuid)) throw notFound('That map does not exist.');
-  return uuid;
+  const map = findMap(uuid);
+  if (!map) throw notFound('That map does not exist.');
+  return map;
 }
 
 async function serve(
   c: Context<AppEnv>,
   uuid: string,
   variant: 'full' | 'thumb',
+  format: ImageFormat,
   disposition?: string,
 ): Promise<Response> {
-  const file = imageFile(uuid, variant);
+  const file = imageFile(uuid, variant, format);
 
   if (!(await file.exists())) {
     // The database row exists but the file does not — a real inconsistency
@@ -49,7 +55,9 @@ async function serve(
   }
 
   const headers = new Headers({
-    'Content-Type': 'image/webp',
+    // From the row, not from IMAGE_FORMAT: a map keeps the format it was stored
+    // in, so the two disagree for everything uploaded before a format change.
+    'Content-Type': FORMAT_MIME_TYPES[format],
     // Stated explicitly rather than left to the runtime: later middleware
     // rebuilds the response to attach security headers, which would otherwise
     // turn this into a chunked transfer of unknown length and cost the browser
@@ -78,20 +86,25 @@ fileRoutes.get('/i/pending/:uuid/thumb', async (c) => {
   const pending = findPendingUpload(uuid, c.get('user')!.id);
   if (!pending) throw notFound('That image is not waiting to be saved.');
 
-  return serve(c, uuid, 'thumb');
+  return serve(c, uuid, 'thumb', pending.format);
 });
 
-fileRoutes.get('/i/:uuid/thumb', async (c) => serve(c, requireMapUuid(c.req.param('uuid')), 'thumb'));
+fileRoutes.get('/i/:uuid/thumb', async (c) => {
+  const map = requireMap(c.req.param('uuid'));
+  return serve(c, map.uuid, 'thumb', map.format);
+});
 
-fileRoutes.get('/i/:uuid/full', async (c) => serve(c, requireMapUuid(c.req.param('uuid')), 'full'));
+fileRoutes.get('/i/:uuid/full', async (c) => {
+  const map = requireMap(c.req.param('uuid'));
+  return serve(c, map.uuid, 'full', map.format);
+});
 
 fileRoutes.get('/i/:uuid/download', async (c) => {
-  const uuid = requireMapUuid(c.req.param('uuid'));
-  const map = findMap(uuid)!;
+  const map = requireMap(c.req.param('uuid'));
 
-  c.get('logger').info('map downloaded', { uuid, name: map.name });
+  c.get('logger').info('map downloaded', { uuid: map.uuid, name: map.name, format: map.format });
 
-  return serve(c, uuid, 'full', `attachment; filename="${downloadFilename(map)}"`);
+  return serve(c, map.uuid, 'full', map.format, `attachment; filename="${downloadFilename(map)}"`);
 });
 
 /**
@@ -115,7 +128,7 @@ fileRoutes.get('/i/:uuid/download', async (c) => {
  * Content-Disposition header, where quotes or newlines would let it break out
  * of the header it sits in.
  */
-export function downloadFilename(map: Pick<MapRecord, 'name' | 'variant' | 'uuid'>): string {
+export function downloadFilename(map: Pick<MapRecord, 'name' | 'variant' | 'uuid' | 'format'>): string {
   const base = [map.name, map.variant]
     .filter(Boolean)
     .join('-')
@@ -126,5 +139,5 @@ export function downloadFilename(map: Pick<MapRecord, 'name' | 'variant' | 'uuid
     // Truncation can land on a separator, which would double up below.
     .replace(/-+$/, '');
 
-  return `${base || 'battle-map'}-${map.uuid.slice(0, 8)}.webp`;
+  return `${base || 'battle-map'}-${map.uuid.slice(0, 8)}${STORAGE_EXTENSIONS[map.format]}`;
 }

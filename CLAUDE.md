@@ -46,6 +46,13 @@ bun run db:migrate
   `nameFromFilename` exists in both `src/models/maps.ts` (the authority, which
   fills in a blank map name on upload) and as an ES5 copy in `app.js` (which
   fills the field in as soon as a file is picked). Change one, change the other.
+- **A map's storage format lives on its row, not in the config.** `IMAGE_FORMAT`
+  decides what a *new* upload is encoded as; `maps.format` records what each one
+  actually is, and that is what names the file on disk and sets the
+  `Content-Type`. Anything that opens, serves, or renames a stored file needs
+  the format from the row — never `config.image.format`. `deleteImage` is the
+  deliberate exception: it sweeps every extension so a format change cannot
+  strand a file.
 - **Adding a route makes it private by default.** Anything reachable while
   signed out must be listed in `PUBLIC_PATHS` in `auth/middleware.ts`.
 - **A successful upload does not always redirect.** When the new image

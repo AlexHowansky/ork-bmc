@@ -112,6 +112,9 @@ the following features:
 
 * On the map detail page, clicking on the map should show it full size.
 
+* The image storage format (default WEBP), image quality (default 95), and
+  lossless flag (default false) should be controlled by .env file settings.
+
 ## Additional Rules
 
 Always obey the following rules:

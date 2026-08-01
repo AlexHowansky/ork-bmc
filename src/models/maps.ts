@@ -4,7 +4,7 @@
  * `maps` holds the canonical columns; `maps_fts` is a search index kept in step
  * by triggers. Searches read the index and join back for the full row.
  */
-import { config } from '../config.ts';
+import { config, type ImageFormat } from '../config.ts';
 import { db } from '../db/index.ts';
 import { conflict, notFound, validationFailed } from '../errors.ts';
 import { hammingDistance, isValidFingerprint } from '../images/fingerprint.ts';
@@ -14,6 +14,8 @@ export interface MapRecord {
   uuid: string;
   name: string;
   variant: string;
+  /** The format the files on disk are actually in; see IMAGE_FORMAT. */
+  format: ImageFormat;
   tags: string[];
   gridSize: number | null;
   gridWidth: number | null;
@@ -35,6 +37,7 @@ interface MapRow {
   uuid: string;
   name: string;
   variant: string;
+  format: ImageFormat;
   tags: string;
   grid_size: number | null;
   grid_width: number | null;
@@ -55,6 +58,7 @@ const toMap = (row: MapRow): MapRecord => ({
   uuid: row.uuid,
   name: row.name,
   variant: row.variant,
+  format: row.format,
   tags: parseTags(row.tags),
   gridSize: row.grid_size,
   gridWidth: row.grid_width,
@@ -374,6 +378,7 @@ export interface UpdatedImage {
 
 export interface CreateMapInput extends MapInput {
   uuid: string;
+  format: ImageFormat;
   imageWidth: number;
   imageHeight: number;
   fileSize: number;
@@ -401,16 +406,17 @@ export function createMap(input: CreateMapInput): MapRecord {
 
   try {
     db.query(
-      `INSERT INTO maps (uuid, name, variant, tags, grid_size, grid_width, grid_height,
+      `INSERT INTO maps (uuid, name, variant, format, tags, grid_size, grid_width, grid_height,
                          image_width, image_height, file_size, grid_source, upscale_factor,
                          fingerprint, original_filename, uploaded_by, created_at, updated_at)
-       VALUES ($uuid, $name, $variant, $tags, $gridSize, $gridWidth, $gridHeight,
+       VALUES ($uuid, $name, $variant, $format, $tags, $gridSize, $gridWidth, $gridHeight,
                $imageWidth, $imageHeight, $fileSize, $gridSource, $upscaleFactor,
                $fingerprint, $originalFilename, $uploadedBy, $createdAt, $updatedAt)`,
     ).run({
       $uuid: input.uuid,
       $name: input.name,
       $variant: input.variant,
+      $format: input.format,
       $tags: serialiseTags(input.tags),
       $gridSize: input.gridSize,
       $gridWidth: input.gridWidth,

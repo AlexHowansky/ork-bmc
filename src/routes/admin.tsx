@@ -33,7 +33,7 @@ import {
 } from '../models/pendingUploads.ts';
 import type { AppEnv } from '../types.ts';
 import { DuplicateWarning } from '../views/DuplicateWarning.tsx';
-import { MapForm, type MapFormMode, type MapFormValues, type StagedUpload } from '../views/MapForm.tsx';
+import { MapForm, storageDescription, type MapFormMode, type MapFormValues, type StagedUpload } from '../views/MapForm.tsx';
 import { page, setFlash } from '../views/render.tsx';
 
 export const adminRoutes = new Hono<AppEnv>();
@@ -199,7 +199,7 @@ adminRoutes.get('/maps/new', (c) =>
     <div class="mx-auto max-w-3xl">
       <h1 class="text-2xl font-bold tracking-tight">Upload a map</h1>
       <p class="mt-2 text-sm text-stone-600 dark:text-stone-400">
-        The image is converted to lossless WEBP and stored under a new identifier.
+        The image is converted to {storageDescription()} and stored under a new identifier.
       </p>
       <div class="mt-8">
         <MapForm mode="create" action="/maps/new" csrfToken={c.get('csrfToken')} values={emptyValues()} />
@@ -271,6 +271,7 @@ async function createFromUpload(c: Context<AppEnv>, body: Record<string, unknown
         gridSource: processed.grid.source,
         upscaleFactor: processed.grid.upscaleFactor,
         originalFilename,
+        format: processed.format,
       });
 
       logger.info('upload staged as a possible duplicate', {
@@ -292,6 +293,7 @@ async function createFromUpload(c: Context<AppEnv>, body: Record<string, unknown
     try {
       const map = createMap({
         uuid: processed.uuid,
+        format: processed.format,
         name: parsed.name,
         variant: parsed.variant,
         tags: parsed.tags,
@@ -375,6 +377,9 @@ async function resolveStagedUpload(c: Context<AppEnv>, body: Record<string, unkn
 
     const map = createMap({
       uuid: pending.uuid,
+      // The staged files are already on disk in this format; the row inherits it
+      // rather than reading IMAGE_FORMAT again, which may since have changed.
+      format: pending.format,
       name: parsed.name,
       variant: parsed.variant,
       tags: parsed.tags,
@@ -522,7 +527,7 @@ adminRoutes.post('/maps/:uuid/edit', async (c) => {
     // Re-encode before touching the row, but write nothing yet: `updateMap` can
     // still reject the submission over a duplicate name, and the files on disk
     // must not have moved on by the time it does.
-    const rescaled = grid.target ? await rescaleStored(map.uuid, grid.target) : null;
+    const rescaled = grid.target ? await rescaleStored(map.uuid, grid.target, map.format) : null;
 
     const updated = updateMap(
       map.uuid,
@@ -541,7 +546,7 @@ adminRoutes.post('/maps/:uuid/edit', async (c) => {
     );
 
     if (rescaled) {
-      await storeImage(map.uuid, rescaled.full, rescaled.thumb);
+      await storeImage(map.uuid, rescaled.full, rescaled.thumb, map.format);
     }
 
     c.get('logger').info('map updated', {

@@ -11,6 +11,15 @@ import { isAbsolute, resolve } from 'node:path';
 export const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
+/**
+ * The formats a map can be stored in.
+ *
+ * The same three the uploader accepts, because a stored map is re-encoded from
+ * whatever was uploaded and has to be readable by the same decoder afterwards.
+ */
+export const IMAGE_FORMATS = ['webp', 'png', 'jpeg'] as const;
+export type ImageFormat = (typeof IMAGE_FORMATS)[number];
+
 export interface Config {
   readonly env: 'development' | 'production' | 'test';
   readonly host: string;
@@ -24,6 +33,19 @@ export interface Config {
   readonly thumbSize: number;
   readonly thumbQuality: number;
   readonly pageSize: number;
+
+  /** How an uploaded map is re-encoded for storage. */
+  readonly image: {
+    readonly format: ImageFormat;
+    /**
+     * 1–100. Meaningful for JPEG always, for WEBP unless `lossless` is set, and
+     * for PNG only below 100, where it turns on palette quantisation — the one
+     * way PNG can trade quality for size.
+     */
+    readonly quality: number;
+    /** WEBP only: PNG is lossless whatever this says, and JPEG can never be. */
+    readonly lossless: boolean;
+  };
 
   /** Reserved for the deferred grid detector; validated now so it needs no config work later. */
   readonly grid: {
@@ -129,6 +151,18 @@ class EnvReader {
     return fallback;
   }
 
+  /** `jpg` is what people type, so it is accepted as a spelling of `jpeg`. */
+  imageFormat(key: string, fallback: ImageFormat): ImageFormat {
+    const value = this.raw(key)?.toLowerCase();
+    if (value === undefined) return fallback;
+    const normalised = value === 'jpg' ? 'jpeg' : value;
+    if (!IMAGE_FORMATS.includes(normalised as ImageFormat)) {
+      this.problems.push(`${key} must be one of ${IMAGE_FORMATS.join(', ')} (got "${value}")`);
+      return fallback;
+    }
+    return normalised as ImageFormat;
+  }
+
   /** Resolves to an absolute path so behaviour never depends on the working directory. */
   path(key: string, fallback: string): string {
     const value = this.raw(key) ?? fallback;
@@ -152,6 +186,12 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): C
     thumbSize: read.number('THUMB_SIZE', 400, { min: 32, max: 2000, integer: true }),
     thumbQuality: read.number('THUMB_QUALITY', 90, { min: 1, max: 100, integer: true }),
     pageSize: read.number('PAGE_SIZE', 24, { min: 1, max: 200, integer: true }),
+
+    image: {
+      format: read.imageFormat('IMAGE_FORMAT', 'webp'),
+      quality: read.number('IMAGE_QUALITY', 95, { min: 1, max: 100, integer: true }),
+      lossless: read.boolean('IMAGE_LOSSLESS', false),
+    },
 
     grid: {
       maxUpscale: read.number('GRID_MAX_UPSCALE', 2.0, { min: 1, max: 8 }),
@@ -190,6 +230,11 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): C
   }
   if (config.sessionIdleSeconds > config.sessionTtlSeconds) {
     read.problems.push('SESSION_IDLE_SECONDS must not exceed SESSION_TTL_SECONDS');
+  }
+  // Better to refuse at boot than to quietly store lossy files for someone who
+  // asked for lossless ones.
+  if (config.image.lossless && config.image.format === 'jpeg') {
+    read.problems.push('IMAGE_LOSSLESS cannot be set with IMAGE_FORMAT=jpeg, because JPEG is always lossy');
   }
 
   if (read.problems.length > 0) {

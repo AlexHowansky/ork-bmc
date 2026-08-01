@@ -1,13 +1,19 @@
 /**
- * Upload processing: validate, normalise, convert to WEBP, thumbnail.
+ * Upload processing: validate, normalise, re-encode, thumbnail.
  *
- * Stored maps are always **lossless** WEBP, so converting a PNG or JPEG never
- * costs quality. Thumbnails are a separate derived preview and are lossy by
- * design — a lossless thumbnail would be pointlessly large.
+ * What a stored map is encoded as comes from IMAGE_FORMAT, IMAGE_QUALITY and
+ * IMAGE_LOSSLESS — see `encodeSettings` below for what each format does with
+ * them. The defaults are WEBP at quality 100, which is visually indistinguishable
+ * from the source but not bit-exact; set IMAGE_LOSSLESS=true for that.
+ *
+ * Thumbnails are a separate derived preview and are lossy by design at
+ * THUMB_QUALITY — a lossless thumbnail would be pointlessly large — but they are
+ * written in the same format as the map, so both files can be served with one
+ * recorded Content-Type.
  */
-import sharp from 'sharp';
+import sharp, { type Sharp } from 'sharp';
 
-import { config } from '../config.ts';
+import { config, type ImageFormat } from '../config.ts';
 import { badRequest, payloadTooLarge } from '../errors.ts';
 import { log } from '../log.ts';
 import { fingerprintImage } from './fingerprint.ts';
@@ -24,10 +30,56 @@ import { imageFile, storeImage } from './storage.ts';
 export const ACCEPTED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 export const ACCEPTED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp'] as const;
 
-/** WEBP cannot represent a dimension beyond this, whatever the source format. */
-const WEBP_MAX_DIMENSION = 16_383;
+/**
+ * The largest dimension each format can represent.
+ *
+ * WEBP's 16,383 is the tight one and the reason this check exists at all; PNG's
+ * limit is theoretical, and MAX_IMAGE_PIXELS bites long before it.
+ */
+const MAX_DIMENSION: Record<ImageFormat, number> = {
+  webp: 16_383,
+  jpeg: 65_535,
+  png: 2_147_483_647,
+};
 
-export type DetectedFormat = 'png' | 'jpeg' | 'webp';
+export type DetectedFormat = ImageFormat;
+
+/** How a format is spelled for a human. */
+export const FORMAT_LABELS: Record<ImageFormat, string> = { webp: 'WEBP', png: 'PNG', jpeg: 'JPEG' };
+
+export const FORMAT_MIME_TYPES: Record<ImageFormat, string> = {
+  webp: 'image/webp',
+  png: 'image/png',
+  jpeg: 'image/jpeg',
+};
+
+export interface EncodeSettings {
+  format: ImageFormat;
+  quality: number;
+  lossless: boolean;
+}
+
+/**
+ * Applies the configured encoder to a pipeline.
+ *
+ * Each format reads the settings differently, and pretending otherwise would
+ * quietly mislead: WEBP is the only one with a lossless switch, PNG is lossless
+ * whatever the flag says and can only spend quality through palette
+ * quantisation, and JPEG has quality alone. Refusing lossless JPEG happens at
+ * boot, in `loadConfig`, rather than here.
+ */
+export function encodeAs(pipeline: Sharp, settings: EncodeSettings): Sharp {
+  switch (settings.format) {
+    case 'webp':
+      return pipeline.webp({ quality: settings.quality, lossless: settings.lossless, effort: 4 });
+    case 'jpeg':
+      return pipeline.jpeg({ quality: settings.quality });
+    case 'png':
+      return settings.quality < 100
+        ? pipeline.png({ compressionLevel: 9, palette: true, quality: settings.quality })
+        : pipeline.png({ compressionLevel: 9 });
+  }
+}
 
 /**
  * Identifies the format from the file's own leading bytes.
@@ -61,6 +113,12 @@ export interface ProcessedImage {
   grid: ResolvedGrid;
   /** Taken from the stored pixels, for recognising a map already in the library. */
   fingerprint: string;
+  /**
+   * What was actually written, which is the configured format at the moment of
+   * the upload. Recorded on the row rather than re-read from the config later,
+   * so changing IMAGE_FORMAT never invalidates a map already in the library.
+   */
+  format: ImageFormat;
 }
 
 export interface ProcessOptions {
@@ -121,7 +179,7 @@ export async function processUpload(bytes: Uint8Array, options: ProcessOptions):
   const outputWidth = grid.target?.width ?? sourceWidth;
   const outputHeight = grid.target?.height ?? sourceHeight;
 
-  assertWebpEncodable(outputWidth, outputHeight);
+  assertEncodable(outputWidth, outputHeight, config.image.format);
 
   // `.rotate()` with no argument applies the EXIF orientation, so a photo of a
   // battle map is stored the way it was taken. Re-encoding also drops every
@@ -132,7 +190,7 @@ export async function processUpload(bytes: Uint8Array, options: ProcessOptions):
     output = output.resize({ width: outputWidth, height: outputHeight, kernel: 'lanczos3', fit: 'fill' });
   }
 
-  const full = await output.webp({ lossless: true, effort: 4 }).toBuffer();
+  const full = await encodeAs(output, config.image).toBuffer();
   const thumb = await makeThumbnail(full);
 
   // Taken from the encoded output rather than the source bytes, so the stored
@@ -141,7 +199,7 @@ export async function processUpload(bytes: Uint8Array, options: ProcessOptions):
   // reduction, so that enlargement makes almost no difference to it.
   const fingerprint = await fingerprintImage(full);
 
-  await storeImage(uuid, full, thumb);
+  await storeImage(uuid, full, thumb, config.image.format);
 
   // Rotation can transpose the dimensions, so read them back from the encoded
   // output rather than assuming what went in.
@@ -152,6 +210,9 @@ export async function processUpload(bytes: Uint8Array, options: ProcessOptions):
   log.info('image processed', {
     uuid,
     sourceFormat: format,
+    storedFormat: config.image.format,
+    quality: config.image.quality,
+    lossless: config.image.lossless,
     sourceBytes: bytes.length,
     storedBytes: full.length,
     imageWidth,
@@ -161,7 +222,15 @@ export async function processUpload(bytes: Uint8Array, options: ProcessOptions):
     fingerprint,
   });
 
-  return { uuid, imageWidth, imageHeight, fileSize: full.length, grid, fingerprint };
+  return {
+    uuid,
+    imageWidth,
+    imageHeight,
+    fileSize: full.length,
+    grid,
+    fingerprint,
+    format: config.image.format,
+  };
 }
 
 export interface RescaledImage {
@@ -181,20 +250,30 @@ export interface RescaledImage {
  * first and only overwrite the files once that has succeeded. There is no
  * pristine original to work from, so repeated edits resample the previous
  * output — see `upscale_factor`, which the caller accumulates.
+ *
+ * The map keeps the format it was stored in, even if IMAGE_FORMAT has changed
+ * since: an edit to the square counts is not a request to convert the library,
+ * and rewriting it under a new extension would leave the old file behind. The
+ * quality and lossless settings are read fresh, because those are policy rather
+ * than a property of the file.
  */
-export async function rescaleStored(uuid: string, target: TargetSize): Promise<RescaledImage> {
-  assertWebpEncodable(target.width, target.height);
+export async function rescaleStored(uuid: string, target: TargetSize, format: ImageFormat): Promise<RescaledImage> {
+  assertEncodable(target.width, target.height, format);
 
-  const source = await imageFile(uuid, 'full').bytes();
+  const source = await imageFile(uuid, 'full', format).bytes();
 
   // No `.rotate()`: the stored file was normalised when it was uploaded and
   // carries no EXIF orientation of its own.
-  const full = await sharp(source, { limitInputPixels: config.maxImagePixels })
-    .resize({ width: target.width, height: target.height, kernel: 'lanczos3', fit: 'fill' })
-    .webp({ lossless: true, effort: 4 })
-    .toBuffer();
+  const resized = sharp(source, { limitInputPixels: config.maxImagePixels }).resize({
+    width: target.width,
+    height: target.height,
+    kernel: 'lanczos3',
+    fit: 'fill',
+  });
 
-  const thumb = await makeThumbnail(full);
+  const full = await encodeAs(resized, { ...config.image, format }).toBuffer();
+
+  const thumb = await makeThumbnail(full, format);
   const meta = await sharp(full).metadata();
   // Re-taken so the column keeps describing the file on disk. A resize this
   // small barely moves the hash, which is the point — the map is still findable
@@ -219,26 +298,30 @@ export async function rescaleStored(uuid: string, target: TargetSize): Promise<R
   };
 }
 
-/** Lossy by design — a lossless preview would be pointlessly large. */
-function makeThumbnail(full: Uint8Array): Promise<Buffer> {
-  return sharp(full, { limitInputPixels: config.maxImagePixels })
-    .resize({
-      width: config.thumbSize,
-      height: config.thumbSize,
-      fit: 'inside',
-      // Never enlarge a small map just to fill the thumbnail box.
-      withoutEnlargement: true,
-      kernel: 'lanczos3',
-    })
-    .webp({ quality: config.thumbQuality })
-    .toBuffer();
+/**
+ * Lossy by design at THUMB_QUALITY — a lossless preview would be pointlessly
+ * large — but in the map's own format, so one recorded format describes both
+ * files and neither route has to guess a Content-Type.
+ */
+function makeThumbnail(full: Uint8Array, format: ImageFormat = config.image.format): Promise<Buffer> {
+  const resized = sharp(full, { limitInputPixels: config.maxImagePixels }).resize({
+    width: config.thumbSize,
+    height: config.thumbSize,
+    fit: 'inside',
+    // Never enlarge a small map just to fill the thumbnail box.
+    withoutEnlargement: true,
+    kernel: 'lanczos3',
+  });
+
+  return encodeAs(resized, { format, quality: config.thumbQuality, lossless: false }).toBuffer();
 }
 
-function assertWebpEncodable(width: number, height: number): void {
-  if (width > WEBP_MAX_DIMENSION || height > WEBP_MAX_DIMENSION) {
+function assertEncodable(width: number, height: number, format: ImageFormat): void {
+  const limit = MAX_DIMENSION[format];
+  if (width > limit || height > limit) {
     throw badRequest(
-      `That image is ${width}×${height} pixels. WEBP supports at most ${WEBP_MAX_DIMENSION} pixels on a side, ` +
-        `so please scale it down before uploading.`,
+      `That image is ${width}×${height} pixels. ${FORMAT_LABELS[format]} supports at most ${limit} pixels on a ` +
+        `side, so please scale it down before uploading.`,
     );
   }
 }

@@ -2,6 +2,7 @@
 import type { FC } from 'hono/jsx';
 
 import { config } from '../config.ts';
+import { FORMAT_LABELS } from '../images/process.ts';
 import { CsrfInput } from './Layout.tsx';
 import { button, card, dropZone, dropZoneActive, fieldError, hint, input, inputInvalid, label } from './ui.ts';
 
@@ -15,6 +16,25 @@ export interface MapFormValues {
 }
 
 export type MapFormMode = 'create' | 'edit' | 'confirm';
+
+/**
+ * How this install stores an upload, in a phrase — "lossless WEBP", "PNG",
+ * "JPEG at quality 82".
+ *
+ * The settings are an operator's choice and they change what happens to the
+ * admin's file, so the form says which one is in force rather than repeating a
+ * claim about WEBP that may not be true here.
+ */
+export function storageDescription(): string {
+  const { format, quality, lossless } = config.image;
+  const label = FORMAT_LABELS[format];
+
+  // PNG is lossless whatever IMAGE_LOSSLESS says, and quality below 100 only
+  // means palette quantisation — worth naming as what it is.
+  if (format === 'png') return quality < 100 ? `PNG, palette-reduced to quality ${quality}` : 'lossless PNG';
+  if (lossless) return `lossless ${label}`;
+  return quality === 100 ? `${label} at quality 100` : `${label} at quality ${quality}`;
+}
 
 /**
  * An upload that has been processed and written but not yet committed to a map,
@@ -145,7 +165,7 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
             />
             <p id="image-hint" class={hint}>
               PNG, JPG, or WEBP, up to {Math.floor(config.maxUploadBytes / (1024 * 1024))} MB — choose one, or drag it
-              onto this box. Stored as lossless WEBP, so no quality is lost.
+              onto this box. Stored as {storageDescription()}.
             </p>
             {/* Filled in by app.js when a drop cannot be used; empty otherwise. */}
             <p data-dropzone-message role="status" class={fieldError} />

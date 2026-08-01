@@ -13,13 +13,15 @@
  * it has aged past `config.pendingUploadTtlSeconds`. Both delete the files too —
  * see `expiredPendingUploads`, whose caller is responsible for the unlinking.
  */
-import { config } from '../config.ts';
+import { config, type ImageFormat } from '../config.ts';
 import { db } from '../db/index.ts';
 import type { GridSource } from '../images/grid.ts';
 
 export interface PendingUpload {
   uuid: string;
   userId: string;
+  /** The format the staged files were written in; the map row inherits it. */
+  format: ImageFormat;
   fingerprint: string;
   gridSize: number | null;
   gridWidth: number | null;
@@ -36,6 +38,7 @@ export interface PendingUpload {
 interface PendingUploadRow {
   uuid: string;
   user_id: string;
+  format: ImageFormat;
   fingerprint: string;
   grid_size: number | null;
   grid_width: number | null;
@@ -52,6 +55,7 @@ interface PendingUploadRow {
 const toPending = (row: PendingUploadRow): PendingUpload => ({
   uuid: row.uuid,
   userId: row.user_id,
+  format: row.format,
   fingerprint: row.fingerprint,
   gridSize: row.grid_size,
   gridWidth: row.grid_width,
@@ -69,15 +73,16 @@ export type PendingUploadInput = Omit<PendingUpload, 'createdAt'>;
 
 export function createPendingUpload(input: PendingUploadInput): PendingUpload {
   db.query(
-    `INSERT INTO pending_uploads (uuid, user_id, fingerprint, grid_size, grid_width, grid_height,
+    `INSERT INTO pending_uploads (uuid, user_id, format, fingerprint, grid_size, grid_width, grid_height,
                                   image_width, image_height, file_size, grid_source, upscale_factor,
                                   original_filename, created_at)
-     VALUES ($uuid, $userId, $fingerprint, $gridSize, $gridWidth, $gridHeight,
+     VALUES ($uuid, $userId, $format, $fingerprint, $gridSize, $gridWidth, $gridHeight,
              $imageWidth, $imageHeight, $fileSize, $gridSource, $upscaleFactor,
              $originalFilename, $createdAt)`,
   ).run({
     $uuid: input.uuid,
     $userId: input.userId,
+    $format: input.format,
     $fingerprint: input.fingerprint,
     $gridSize: input.gridSize,
     $gridWidth: input.gridWidth,

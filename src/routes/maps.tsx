@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import type { FC } from 'hono/jsx';
 
 import { config } from '../config.ts';
+import { FORMAT_LABELS } from '../images/process.ts';
 import { notFound } from '../errors.ts';
 import {
   findMap,
@@ -285,7 +286,7 @@ mapRoutes.get('/maps/:uuid', (c) => {
                 {map.imageWidth} × {map.imageHeight} px
               </MetadataRow>
               <MetadataRow term="File size">{formatBytes(map.fileSize)}</MetadataRow>
-              <MetadataRow term="Format">WEBP (lossless)</MetadataRow>
+              <MetadataRow term="Format">{FORMAT_LABELS[map.format]}</MetadataRow>
               {map.variant && <MetadataRow term="Variant">{map.variant}</MetadataRow>}
               <MetadataRow term="Added">{new Date(map.createdAt).toISOString().slice(0, 10)}</MetadataRow>
             </dl>
