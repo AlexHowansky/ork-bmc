@@ -286,7 +286,10 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
 
       <p class={`mt-4 ${hint}`}>
         Leave these blank if the map has no grid. Automatic grid detection is not available yet, so blank values stay
-        blank until you fill them in.
+        blank until you fill them in
+        {mode === 'create'
+          ? ' — though square counts in the file name are read as a starting point, so “Forest Road 40x30.png” arrives with 40 across and 30 down.'
+          : '.'}
       </p>
     </div>
     )}

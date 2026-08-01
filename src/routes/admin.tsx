@@ -10,7 +10,7 @@ import { Hono, type Context } from 'hono';
 import { requireAdmin } from '../auth/middleware.ts';
 import { badRequest, notFound, validationFailed } from '../errors.ts';
 import { processUpload, rescaleStored } from '../images/process.ts';
-import { resolveGrid, type GridInput, type ResolvedGrid } from '../images/grid.ts';
+import { gridFromFilename, resolveGrid, type GridInput, type ResolvedGrid } from '../images/grid.ts';
 import { deleteImage, isValidUuid, storeImage } from '../images/storage.ts';
 import {
   assertTagsAcceptable,
@@ -249,8 +249,20 @@ async function createFromUpload(c: Context<AppEnv>, body: Record<string, unknown
       throw validationFailed({ image: 'Please choose an image file to upload.' });
     }
 
+    // Square counts written into the filename stand in for an untouched grid
+    // section — "Forest Road 40x30.png" means 40 across and 30 down. Anything
+    // the admin typed, including a grid size on its own, outranks them.
+    const fromFilename = gridFromFilename(uploadedName);
+    const untouchedGrid =
+      parsed.gridSize === undefined && parsed.gridWidth === undefined && parsed.gridHeight === undefined;
+    const namedGrid = untouchedGrid ? fromFilename : null;
+
+    if (namedGrid) {
+      values = { ...values, gridWidth: String(namedGrid.gridWidth), gridHeight: String(namedGrid.gridHeight) };
+    }
+
     const bytes = new Uint8Array(await file.arrayBuffer());
-    const processed = await processUpload(bytes, { grid: chooseGridInput(parsed) });
+    const processed = await processUpload(bytes, { grid: namedGrid ?? chooseGridInput(parsed) });
     const originalFilename = uploadedName || null;
 
     const matches = findSimilarMaps(processed.fingerprint);
@@ -310,13 +322,22 @@ async function createFromUpload(c: Context<AppEnv>, body: Record<string, unknown
         uploadedBy: user.id,
       });
 
-      logger.info('map created', { uuid: map.uuid, name: map.name, variant: map.variant });
+      logger.info('map created', {
+        uuid: map.uuid,
+        name: map.name,
+        variant: map.variant,
+        ...(namedGrid ? { gridFromFilename: `${namedGrid.gridWidth}x${namedGrid.gridHeight}` } : {}),
+      });
       setFlash(c, {
         kind: 'success',
         message:
           processed.grid.source === 'none'
             ? `“${map.name}” was uploaded. No grid was recorded — edit the map to add one.`
-            : `“${map.name}” was uploaded.` + gridNote(processed.grid, map.imageWidth, map.imageHeight),
+            : `“${map.name}” was uploaded.` +
+              // Say so, because the admin did not type these: they came from the
+              // file's own name and they are worth a glance before they stand.
+              (namedGrid ? ` Its ${namedGrid.gridWidth}×${namedGrid.gridHeight} grid was read from the file name.` : '') +
+              gridNote(processed.grid, map.imageWidth, map.imageHeight),
       });
 
       return c.redirect(`/maps/${map.uuid}`, 302);

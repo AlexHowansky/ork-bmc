@@ -287,6 +287,49 @@ describe('map lifecycle', () => {
     expect(await response.text()).toContain('value="Lifecycle Rejected"');
   });
 
+  test('square counts in the file name become the grid, and leave the name clean', async () => {
+    const response = await admin.post(
+      '/maps/new',
+      uploadForm(
+        await admin.csrfToken(),
+        await makeMapPng(400, 300, 10),
+        { name: '', gridSize: '', gridWidth: '', gridHeight: '' },
+        'Lifecycle Named Grid 40x30.png',
+      ),
+    );
+
+    const map = findMap(uuidFromRedirect(response))!;
+    expect(map.name).toBe('Lifecycle Named Grid');
+    expect(map).toMatchObject({ gridWidth: 40, gridHeight: 30, gridSize: 10 });
+  });
+
+  test('anything typed into the grid outranks the file name', async () => {
+    const response = await admin.post(
+      '/maps/new',
+      uploadForm(
+        await admin.csrfToken(),
+        await makeMapPng(400, 300, 10),
+        { name: 'Lifecycle Typed Grid', gridSize: '20' },
+        'ignored 40x30.png',
+      ),
+    );
+
+    // The grid size the admin typed decides the counts; the file name is not
+    // allowed to contradict it.
+    expect(findMap(uuidFromRedirect(response))!).toMatchObject({ gridSize: 20, gridWidth: 20, gridHeight: 15 });
+  });
+
+  test('a resolution in the file name is not mistaken for a grid', async () => {
+    const response = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), await makeMapPng(), { name: '' }, 'Lifecycle Resolution 1920x1080.png'),
+    );
+
+    const map = findMap(uuidFromRedirect(response))!;
+    expect(map.gridWidth).toBeNull();
+    expect(map.name).toBe('Lifecycle Resolution 1920x1080');
+  });
+
   test('a map uploaded with no grid says so and offers to add one', async () => {
     const response = await admin.post(
       '/maps/new',

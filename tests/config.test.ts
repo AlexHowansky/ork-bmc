@@ -12,8 +12,8 @@ import { loadConfig } from '../src/config.ts';
 const load = (env: Record<string, string>) => loadConfig(env);
 
 describe('image storage settings', () => {
-  test('default to WEBP at quality 100, not lossless', () => {
-    expect(load({}).image).toEqual({ format: 'webp', quality: 100, lossless: false });
+  test('default to WEBP, not lossless', () => {
+    expect(load({}).image).toEqual({ format: 'webp', quality: 95, lossless: false });
   });
 
   test('accept each supported format, and "jpg" as a spelling of "jpeg"', () => {

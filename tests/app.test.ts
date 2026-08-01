@@ -158,6 +158,89 @@ describe('the upload drop zone', () => {
   });
 });
 
+/** A stand-in for one text input on the upload form. */
+function makeField(value = '') {
+  return {
+    value,
+    attrs: {} as Record<string, string>,
+    getAttribute(name: string): string | null {
+      return this.attrs[name] ?? null;
+    },
+    setAttribute(name: string, next: string) {
+      this.attrs[name] = next;
+    },
+  };
+}
+
+describe('choosing a file', () => {
+  type Field = ReturnType<typeof makeField>;
+  let fields: Record<string, Field>;
+
+  /** Fires the file input's change event with a chosen filename. */
+  function choose(filename: string, typed: Partial<Record<string, string>> = {}): void {
+    fields = {
+      name: makeField(typed['name'] ?? ''),
+      gridSize: makeField(typed['gridSize'] ?? ''),
+      gridWidth: makeField(typed['gridWidth'] ?? ''),
+      gridHeight: makeField(typed['gridHeight'] ?? ''),
+    };
+
+    const form = {
+      querySelector: (selector: string) => {
+        const match = /input\[name="(\w+)"\]/.exec(selector);
+        return match ? (fields[match[1]!] ?? null) : null;
+      },
+    };
+
+    handlers['change']!({
+      target: {
+        hasAttribute: (name: string) => name === 'data-name-from-file',
+        form,
+        files: [{ name: filename }],
+      },
+    });
+  }
+
+  test('names the map after the file', () => {
+    choose('sunken_temple.png');
+    expect(fields['name']!.value).toBe('Sunken Temple');
+  });
+
+  test('takes square counts out of the file name, and leaves them out of it', () => {
+    choose('Forest Road 40x30.png');
+
+    expect(fields['name']!.value).toBe('Forest Road');
+    expect(fields['gridWidth']!.value).toBe('40');
+    expect(fields['gridHeight']!.value).toBe('30');
+    // Derived, not measured: the size is still for the admin or the image to say.
+    expect(fields['gridSize']!.value).toBe('');
+  });
+
+  test('reads a resolution as part of the name, not as a grid', () => {
+    choose('Riverbank 1920x1080.png');
+
+    expect(fields['name']!.value).toBe('Riverbank 1920x1080');
+    expect(fields['gridWidth']!.value).toBe('');
+  });
+
+  test('leaves the grid alone once anything has been typed into it', () => {
+    choose('Forest Road 40x30.png', { gridSize: '70' });
+
+    expect(fields['gridWidth']!.value).toBe('');
+    expect(fields['gridHeight']!.value).toBe('');
+    // The name is a separate field and still fills in.
+    expect(fields['name']!.value).toBe('Forest Road');
+  });
+
+  test('never clobbers a name the admin typed', () => {
+    choose('Forest Road 40x30.png', { name: 'Mine, thanks' });
+
+    expect(fields['name']!.value).toBe('Mine, thanks');
+    // The grid was still untouched, so it is still offered.
+    expect(fields['gridWidth']!.value).toBe('40');
+  });
+});
+
 describe('the full-size map view', () => {
   test('closes on Escape', () => {
     lightbox.checked = true;

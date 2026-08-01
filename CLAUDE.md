@@ -42,10 +42,12 @@ bun run db:migrate
 - **The CSP has no `unsafe-inline`.** No inline `<script>`, and no `style`
   attributes. The single dynamic style (the grid overlay) uses a per-request
   nonce; see `gridOverlayCss` in `views/Layout.tsx`.
-- **`public/app.js` duplicates one server function on purpose.**
-  `nameFromFilename` exists in both `src/models/maps.ts` (the authority, which
-  fills in a blank map name on upload) and as an ES5 copy in `app.js` (which
-  fills the field in as soon as a file is picked). Change one, change the other.
+- **`public/app.js` duplicates two server functions on purpose.**
+  `nameFromFilename` (`src/models/maps.ts`) and `gridFromFilename`
+  (`src/images/grid.ts`) are the authorities: the upload route applies both to
+  the file it receives. `app.js` carries an ES5 copy of each so the name and the
+  square counts appear as soon as a file is picked. Change one, change the other,
+  or the field an admin sees stops matching what gets saved.
 - **A map's storage format lives on its row, not in the config.** `IMAGE_FORMAT`
   decides what a *new* upload is encoded as; `maps.format` records what each one
   actually is, and that is what names the file on disk and sets the

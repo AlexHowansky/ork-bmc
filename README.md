@@ -80,7 +80,12 @@ if uploads must be stored bit-for-bit. Each map records the format it was
 stored in, so changing these settings affects new uploads only; maps already in
 the library keep their files and are still served as what they are.
 
-**Grid geometry.** If a map has a painted grid, record the pixels per square
+**Grid geometry.** If the file name ends in square counts — `Forest Road
+40x30.png` — they are read into the grid fields on upload and left out of the
+derived name. Numbers too large to be a grid are ignored, so a file named after
+its resolution is not mistaken for one.
+
+If a map has a painted grid, record the pixels per square
 (*grid size*) and how many squares fit across and down. Fill in any one of the
 three and the others are worked out for you — enter a grid size of 70 on a
 1400×980 map and it records 20×14 squares. On the map's page, *Show grid

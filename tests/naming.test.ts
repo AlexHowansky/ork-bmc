@@ -43,6 +43,24 @@ describe('nameFromFilename', () => {
     expect(derived.length).toBe(MAX_NAME_LENGTH);
   });
 
+  test('leaves out square counts, which the grid fields take instead', () => {
+    expect(nameFromFilename('Forest Road 40x30.png')).toBe('Forest Road');
+    expect(nameFromFilename('Forest Road (40x30).png')).toBe('Forest Road');
+    expect(nameFromFilename('forest_road_40x30.webp')).toBe('Forest Road');
+    expect(nameFromFilename('Forest Road 40 x 30.png')).toBe('Forest Road');
+  });
+
+  test('keeps numbers the grid fields will not be taking', () => {
+    // A resolution is not a grid, so nothing consumed it and it stays.
+    expect(nameFromFilename('Riverbank 1920x1080.png')).toBe('Riverbank 1920x1080');
+    expect(nameFromFilename('Map 2 (night).jpg')).toBe('Map 2 (night)');
+  });
+
+  test('keeps the counts when they are the whole name', () => {
+    // A poor name, but better than none — and the grid still picks them up.
+    expect(nameFromFilename('40x30.png')).toBe('40x30');
+  });
+
   test('returns empty when there is nothing usable, leaving validation to speak', () => {
     expect(nameFromFilename('')).toBe('');
     expect(nameFromFilename('___.png')).toBe('');

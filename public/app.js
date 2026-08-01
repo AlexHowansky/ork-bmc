@@ -5,8 +5,9 @@
  *
  *   - Theme toggle switches in-page instead of round-tripping.
  *   - Delete buttons ask for confirmation first.
- *   - Choosing a file names the map after it. The server derives the same name
- *     from a blank field, so this only makes it visible sooner.
+ *   - Choosing a file names the map after it, and fills in square counts written
+ *     into the file name. The server derives both from the file it receives, so
+ *     this only makes them visible sooner.
  *   - The upload box accepts a dragged file, handing it to the ordinary file
  *     input so the form still posts in exactly the same way.
  *   - Escape closes the full-size map view, which otherwise opens and closes
@@ -41,11 +42,39 @@
     if (theme !== 'system') root.classList.add(theme);
   }
 
+  // Mirrors `gridFromFilename` in src/images/grid.ts — including the bounds,
+  // which are what stop "Riverbank 1920x1080.png" being read as a grid.
+  var GRID_PATTERN = /(?<![\d.])(\d{1,4})\s*[xX\u00d7]\s*(\d{1,4})(?![\d.])/;
+  var MIN_SQUARES = 3;
+  var MAX_SQUARES = 200;
+
+  function gridFromFilename(filename) {
+    var base = filename.split(/[\\/]/).pop() || '';
+    var stem = base.replace(/\.[^.]+$/, '') || base;
+    var match = GRID_PATTERN.exec(stem);
+    if (!match) return null;
+
+    var width = Number(match[1]);
+    var height = Number(match[2]);
+    var plausible = function (count) {
+      return count >= MIN_SQUARES && count <= MAX_SQUARES;
+    };
+    return plausible(width) && plausible(height) ? { width: width, height: height } : null;
+  }
+
   // Mirrors `nameFromFilename` in src/models/maps.ts, which is the authority:
   // the server applies the same rule to a name left blank. Keep the two in step.
   function nameFromFilename(filename) {
     var base = filename.split(/[\\/]/).pop() || '';
     var stem = base.replace(/\.[^.]+$/, '') || base;
+
+    // Square counts belong to the grid fields, so they are not repeated in the
+    // name — unless they were the whole of it.
+    if (gridFromFilename(stem)) {
+      var stripped = stem.replace(GRID_PATTERN, ' ').replace(/\(\s*\)|\[\s*\]|\{\s*\}/g, ' ');
+      if (stripped.replace(/^\s+|\s+$/g, '') !== '') stem = stripped;
+    }
+
     return stem
       .replace(/[_-]+/g, ' ')
       .replace(/\s+/g, ' ')
@@ -61,18 +90,53 @@
     var input = event.target;
     if (!input || !input.hasAttribute || !input.hasAttribute('data-name-from-file')) return;
 
-    var field = input.form && input.form.querySelector('input[name="name"]');
     var file = input.files && input.files[0];
-    if (!field || !file) return;
+    if (!input.form || !file) return;
 
-    // Only fill a field that is empty or still holds what this handler last
-    // wrote — a name the admin typed is theirs, and picking a second file
-    // should still follow the file.
-    if (field.value !== '' && field.value !== field.getAttribute('data-autofilled')) return;
-
-    field.value = nameFromFilename(file.name);
-    field.setAttribute('data-autofilled', field.value);
+    // The name and the grid are filled in independently, exactly as the server
+    // does it: typing a name of your own is no reason to be denied the grid.
+    fillName(input.form, file.name);
+    fillGrid(input.form, file.name);
   });
+
+  /**
+   * True for a field that is empty, or still holds what this script last wrote.
+   * Anything the admin typed is theirs and is never overwritten; picking a
+   * second file does still follow the new file.
+   */
+  function untouched(field) {
+    return field.value === '' || field.value === field.getAttribute('data-autofilled');
+  }
+
+  function fillName(form, filename) {
+    var field = form.querySelector('input[name="name"]');
+    if (!field || !untouched(field)) return;
+
+    field.value = nameFromFilename(filename);
+    field.setAttribute('data-autofilled', field.value);
+  }
+
+  /**
+   * Offers the square counts from the file name, but only when the whole grid
+   * section is untouched — the same rule the server applies, so what is shown
+   * here is what would have happened anyway.
+   */
+  function fillGrid(form, filename) {
+    var size = form.querySelector('input[name="gridSize"]');
+    var width = form.querySelector('input[name="gridWidth"]');
+    var height = form.querySelector('input[name="gridHeight"]');
+    if (!size || !width || !height) return;
+
+    if (!untouched(size) || !untouched(width) || !untouched(height)) return;
+
+    var grid = gridFromFilename(filename);
+    if (!grid) return;
+
+    width.value = String(grid.width);
+    width.setAttribute('data-autofilled', width.value);
+    height.value = String(grid.height);
+    height.setAttribute('data-autofilled', height.value);
+  }
 
   // The full-size map view is a checkbox and a label, so clicking closes it and
   // so does Space on the focused control. Escape is the one thing CSS cannot

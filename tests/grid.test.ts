@@ -7,7 +7,13 @@
  */
 import { describe, expect, test } from 'bun:test';
 
-import { detectGrid, fitGridToCounts, resolveGrid, solveIntegerUpscale } from '../src/images/grid.ts';
+import {
+  detectGrid,
+  fitGridToCounts,
+  gridFromFilename,
+  resolveGrid,
+  solveIntegerUpscale,
+} from '../src/images/grid.ts';
 import { isAppError } from '../src/errors.ts';
 
 describe('detectGrid (stub)', () => {
@@ -205,5 +211,54 @@ describe('resolveGrid', () => {
   test('with nothing supplied, the stub detector still yields no grid', () => {
     const raw = { data: new Uint8Array(image.width * image.height), ...image };
     expect(resolveGrid({}, image, raw).source).toBe('none');
+  });
+});
+
+describe('gridFromFilename', () => {
+  const grid = (width: number, height: number) => ({ gridWidth: width, gridHeight: height });
+
+  test('reads the counts out of a plainly named file', () => {
+    expect(gridFromFilename('Forest Road 40x30.png')).toEqual(grid(40, 30));
+  });
+
+  test('accepts the separators and spacing people actually type', () => {
+    expect(gridFromFilename('Forest Road 40X30.png')).toEqual(grid(40, 30));
+    expect(gridFromFilename('Forest Road 40 x 30.webp')).toEqual(grid(40, 30));
+    expect(gridFromFilename('Forest Road 40×30.jpg')).toEqual(grid(40, 30));
+    expect(gridFromFilename('forest_road_40x30.png')).toEqual(grid(40, 30));
+    expect(gridFromFilename('Forest Road (40x30).png')).toEqual(grid(40, 30));
+    expect(gridFromFilename('Forest Road [40x30].png')).toEqual(grid(40, 30));
+  });
+
+  test('ignores a path in front of the name', () => {
+    expect(gridFromFilename('/home/alex/maps/Forest Road 40x30.png')).toEqual(grid(40, 30));
+    expect(gridFromFilename('C:\\maps\\Forest Road 40x30.png')).toEqual(grid(40, 30));
+  });
+
+  test('refuses pixel dimensions, which is what most filenames carry', () => {
+    // The whole reason for an upper bound: this is a resolution, not a grid.
+    expect(gridFromFilename('Riverbank 1920x1080.png')).toBeNull();
+    expect(gridFromFilename('Keep 4096x4096.webp')).toBeNull();
+  });
+
+  test('refuses counts too small to be a grid', () => {
+    expect(gridFromFilename('Ruins v2x2.png')).toBeNull();
+    expect(gridFromFilename('Tokens 1x1.png')).toBeNull();
+  });
+
+  test('does not tear a number out of a longer one', () => {
+    expect(gridFromFilename('Cavern 1140x30.png')).toBeNull();
+    expect(gridFromFilename('Cavern 40x3000.png')).toBeNull();
+    expect(gridFromFilename('Scale 1.5x30.png')).toBeNull();
+  });
+
+  test('finds nothing to read in an ordinary name', () => {
+    expect(gridFromFilename('River Crossing.png')).toBeNull();
+    expect(gridFromFilename('map.png')).toBeNull();
+    expect(gridFromFilename('')).toBeNull();
+  });
+
+  test('does not read the extension', () => {
+    expect(gridFromFilename('sunken-temple.40x30')).toBeNull();
   });
 });

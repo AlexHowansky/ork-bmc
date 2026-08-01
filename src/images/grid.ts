@@ -112,6 +112,57 @@ export interface GridInput {
   gridHeight?: number | undefined;
 }
 
+// ---------------------------------------------------------------------------
+// Square counts written into a filename
+// ---------------------------------------------------------------------------
+
+/**
+ * The smallest and largest square counts worth believing from a filename.
+ *
+ * The upper bound is what keeps `Riverbank 1920x1080.png` from being read as a
+ * grid: map filenames carry pixel dimensions at least as often as square counts,
+ * and nobody paints a grid two thousand squares across. A 200-square map at a
+ * typical 70px per square is already 14,000 pixels wide, past what WEBP can
+ * store. The lower bound rules out `Ruins v2x2.png` and similar noise.
+ */
+const MIN_FILENAME_SQUARES = 3;
+const MAX_FILENAME_SQUARES = 200;
+
+/**
+ * Matches the square counts in a name like `Forest Road 40x30`.
+ *
+ * Anchored on non-digit boundaries so `1140x30` is not read as `40x30`, and the
+ * separator covers what people actually type: `x`, `X`, and the `×` sign a Mac
+ * will happily insert. Any brackets around it are left to the caller to tidy.
+ */
+export const FILENAME_GRID_PATTERN = /(?<![\d.])(\d{1,4})\s*[xX×]\s*(\d{1,4})(?![\d.])/;
+
+/**
+ * Reads square counts out of a filename, for use as form defaults.
+ *
+ * Deliberately conservative: it is offering the admin a starting point on the
+ * upload form, not recording a measurement, so anything ambiguous returns null
+ * and the fields stay blank. `public/app.js` carries an ES5 copy of this so the
+ * fields fill in as soon as a file is chosen; this is the authority.
+ */
+export function gridFromFilename(filename: string): { gridWidth: number; gridHeight: number } | null {
+  const base = filename.split(/[\\/]/).pop() ?? '';
+  // Drop the extension first, so `map.40x30` cannot be read out of `.40x30`
+  // and, more usefully, so nothing in the extension can match.
+  const stem = base.replace(/\.[^.]+$/, '') || base;
+
+  const match = FILENAME_GRID_PATTERN.exec(stem);
+  if (!match?.[1] || !match[2]) return null;
+
+  const gridWidth = Number(match[1]);
+  const gridHeight = Number(match[2]);
+
+  const plausible = (count: number): boolean =>
+    Number.isInteger(count) && count >= MIN_FILENAME_SQUARES && count <= MAX_FILENAME_SQUARES;
+
+  return plausible(gridWidth) && plausible(gridHeight) ? { gridWidth, gridHeight } : null;
+}
+
 /** Dimensions an image must have for its recorded grid to land on whole pixels. */
 export interface TargetSize {
   width: number;

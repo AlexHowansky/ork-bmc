@@ -8,7 +8,7 @@ import { config, type ImageFormat } from '../config.ts';
 import { db } from '../db/index.ts';
 import { conflict, notFound, validationFailed } from '../errors.ts';
 import { hammingDistance, isValidFingerprint } from '../images/fingerprint.ts';
-import type { GridSource } from '../images/grid.ts';
+import { FILENAME_GRID_PATTERN, gridFromFilename, type GridSource } from '../images/grid.ts';
 
 export interface MapRecord {
   uuid: string;
@@ -82,6 +82,26 @@ const toMap = (row: MapRow): MapRecord => ({
 export const MAX_NAME_LENGTH = 200;
 
 /**
+ * Removes square counts the grid fields will have taken, so "Forest Road 40x30"
+ * is named "Forest Road" rather than repeating geometry the map already records.
+ *
+ * Only counts `gridFromFilename` actually believes are removed — a filename
+ * carrying pixel dimensions keeps them, because nothing else picked them up. If
+ * the counts were the whole name, they stay: a map called "40x30" is a poor
+ * name, but it beats no name at all.
+ */
+function withoutGridToken(stem: string): string {
+  if (!gridFromFilename(stem)) return stem;
+
+  const stripped = stem
+    .replace(FILENAME_GRID_PATTERN, ' ')
+    // Whatever was wrapped around it is now empty.
+    .replace(/\(\s*\)|\[\s*\]|\{\s*\}/g, ' ');
+
+  return stripped.trim() === '' ? stem : stripped;
+}
+
+/**
  * Derives a map name from the name of the file that was uploaded.
  *
  * Used as the default when the upload form arrives without one, so an admin who
@@ -100,7 +120,7 @@ export function nameFromFilename(filename: string): string {
   const stem = base.replace(/\.[^.]+$/, '') || base;
 
   return (
-    stem
+    withoutGridToken(stem)
       .replace(/[_-]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
