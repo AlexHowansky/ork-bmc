@@ -7,6 +7,8 @@ at the right scale, and find them again by name or tag.
 Every page requires a sign-in, and full-resolution maps are served only through
 authenticated routes — the image directory is never exposed as static files.
 
+![Sample installation](example.webp)
+
 ## Requirements
 
 - [Bun](https://bun.com) 1.2.3 or newer (developed against 1.3.14)
@@ -232,7 +234,8 @@ data/images/60/601eece7-4038-4922-9f64-8cc2247f7bd3_thumb.webp
 - **Light and dark mode need no JavaScript.** A cookie records the preference
   and the server renders the matching class, so the first paint is already
   correct. With no preference set, CSS follows the operating system.
-- **Thumbnails are lossy** (quality 90 by default); stored maps never are.
+- **Thumbnails are lossy** (quality 90 by default); stored maps may be lossy
+  depending on configuration.
 
 ## Deployment
 
@@ -242,4 +245,4 @@ database and `IMAGE_DIR`.
 
 ## License
 
-Not currently licensed for redistribution.
+MIT — see [LICENSE](LICENSE).

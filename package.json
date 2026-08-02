@@ -4,6 +4,7 @@
   "module": "src/server.tsx",
   "type": "module",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "dev": "bun run css:build && bun --watch src/server.tsx",
     "start": "bun run src/server.tsx",
