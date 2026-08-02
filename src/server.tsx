@@ -176,7 +176,7 @@ if (import.meta.main) {
     maxRequestBodySize: config.maxUploadBytes + 2 * 1024 * 1024,
   });
 
-  log.info('battle mapper started', {
+  log.info('battle map curator started', {
     url: `http://${config.host}:${config.port}`,
     env: config.env,
     imageDir: config.imageDir,

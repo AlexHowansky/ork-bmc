@@ -1,4 +1,4 @@
-# Battle Mapper — working notes
+# Battle Map Curator — working notes
 
 A server-rendered map library for tabletop games. Read `README.md` for what the
 app does and `SPEC.md` for the requirements it was built against.
@@ -56,7 +56,7 @@ bun run db:migrate
   deliberate exception: it sweeps every extension so a format change cannot
   strand a file.
 - **`GET /maps` can answer with a 302.** The last search is remembered in the
-  `bm_search` cookie, so arriving at the listing with no query of its own
+  `bmc_search` cookie, so arriving at the listing with no query of its own
   restores it — see `src/searchMemory.ts`. Clearing is `/maps?clear=1`, never a
   bare `/maps`, which would only put the search back. Anything asserting a 200
   from `/maps` has to run before a search or after a clear.

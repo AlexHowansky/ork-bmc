@@ -300,7 +300,7 @@ describe('remembered search', () => {
 
     // Header injection, an unknown sort, an unknown mode, and an over-long term.
     client.setCookie(
-      'bm_search',
+      'bmc_search',
       `q=${encodeURIComponent('evil\r\nX-Injected: 1')}&sort=../../etc&mode=weird&page=9`,
     );
 

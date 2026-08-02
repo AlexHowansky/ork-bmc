@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "claude_battlemapper_opus",
+      "name": "bmc",
       "dependencies": {
         "hono": "^4.12.33",
         "sharp": "^0.35.3",

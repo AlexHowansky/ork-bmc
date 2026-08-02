@@ -2,7 +2,7 @@
 /**
  * Account management CLI.
  *
- * The only way to create a Battle Mapper account — the web app has no
+ * The only way to create a Battle Map Curator account — the web app has no
  * registration path. Fully non-interactive: every argument comes from argv.
  *
  *   bun run cli/user.ts create          --email a@b.c --password 'secret' --role admin
@@ -35,7 +35,7 @@ import {
 const COMMANDS = ['create', 'delete', 'list', 'change-role', 'change-password'] as const;
 type Command = (typeof COMMANDS)[number];
 
-const USAGE = `Battle Mapper — account management
+const USAGE = `Battle Map Curator — account management
 
 Usage: bun run cli/user.ts <command> [options]
 

@@ -19,7 +19,7 @@ import type { Context } from 'hono';
 import { config } from './config.ts';
 import type { AppEnv } from './types.ts';
 
-export const SEARCH_COOKIE = 'bm_search';
+export const SEARCH_COOKIE = 'bmc_search';
 
 /** The parameters the search form owns; `page` is deliberately not among them. */
 export const SEARCH_PARAMS = ['q', 'tags', 'mode', 'sort'] as const;

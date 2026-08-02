@@ -48,7 +48,7 @@ const LoginPage: FC<LoginPageProps> = ({ email, next, csrfToken, error }) => (
     <div class={`p-6 sm:p-8 ${card}`}>
       <h1 class="text-2xl font-bold tracking-tight">Sign in</h1>
       <p class="mt-2 text-sm text-stone-600 dark:text-stone-400">
-        Battle Mapper accounts are created by an administrator.
+        Battle Map Curator accounts are created by an administrator.
       </p>
 
       {error && (

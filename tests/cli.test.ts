@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = mkdtempSync(join(tmpdir(), 'battlemapper-cli-'));
+const root = mkdtempSync(join(tmpdir(), 'bmc-cli-'));
 const CLI = join(import.meta.dir, '..', 'cli', 'user.ts');
 
 const env = {

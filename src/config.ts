@@ -178,7 +178,7 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): C
     host: read.string('HOST', '127.0.0.1'),
     port: read.number('PORT', 3000, { min: 1, max: 65535, integer: true }),
 
-    databasePath: read.path('DATABASE_PATH', './data/battlemapper.sqlite'),
+    databasePath: read.path('DATABASE_PATH', './data/bmc.sqlite'),
     imageDir: read.path('IMAGE_DIR', './data/images'),
 
     maxUploadBytes: read.bytes('MAX_UPLOAD_BYTES', 25 * 1024 * 1024, { min: 1024, max: 1024 ** 3 }),

@@ -1,5 +1,5 @@
 {
-  "name": "battle-mapper",
+  "name": "battle-map-curator",
   "version": "1.0.0",
   "module": "src/server.tsx",
   "type": "module",

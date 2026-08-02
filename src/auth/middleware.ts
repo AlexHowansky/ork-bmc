@@ -14,7 +14,7 @@ import { log } from '../log.ts';
 import type { AppEnv, Theme } from '../types.ts';
 import { SESSION_COOKIE, randomToken, resolveSession } from './session.ts';
 
-export const THEME_COOKIE = 'bm_theme';
+export const THEME_COOKIE = 'bmc_theme';
 
 /**
  * CSRF token for visitors who have no session yet — the sign-in form, and the
@@ -23,7 +23,7 @@ export const THEME_COOKIE = 'bm_theme';
  * HttpOnly cookie and is echoed in the form, and an attacker on another origin
  * can neither read the cookie nor guess the value.
  */
-const ANON_CSRF_COOKIE = config.cookieSecure ? '__Host-bm_csrf' : 'bm_csrf';
+const ANON_CSRF_COOKIE = config.cookieSecure ? '__Host-bmc_csrf' : 'bmc_csrf';
 
 function anonymousCsrfToken(c: Context<AppEnv>): string {
   const existing = getCookie(c, ANON_CSRF_COOKIE);

@@ -1,4 +1,4 @@
--- Battle Mapper initial schema.
+-- Battle Map Curator initial schema.
 --
 -- Note on identifiers: maps are addressed externally by their UUID v4 only.
 -- SQLite's implicit `rowid` exists solely as the join key FTS5 requires; it is

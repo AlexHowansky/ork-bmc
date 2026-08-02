@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = mkdtempSync(join(tmpdir(), 'battlemapper-test-'));
+const root = mkdtempSync(join(tmpdir(), 'bmc-test-'));
 
 process.env['NODE_ENV'] = 'test';
 process.env['DATABASE_PATH'] = join(root, 'test.sqlite');

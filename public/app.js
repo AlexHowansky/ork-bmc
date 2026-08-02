@@ -24,16 +24,16 @@
   var ICONS = { system: '🖥️', light: '☀️', dark: '🌙' };
 
   function currentTheme() {
-    var match = /(?:^|;\s*)bm_theme=(light|dark)(?:;|$)/.exec(document.cookie);
+    var match = /(?:^|;\s*)bmc_theme=(light|dark)(?:;|$)/.exec(document.cookie);
     return match ? match[1] : 'system';
   }
 
   function persist(theme) {
     var base = ';path=/;max-age=31536000;samesite=lax' + (location.protocol === 'https:' ? ';secure' : '');
     if (theme === 'system') {
-      document.cookie = 'bm_theme=;path=/;max-age=0';
+      document.cookie = 'bmc_theme=;path=/;max-age=0';
     } else {
-      document.cookie = 'bm_theme=' + theme + base;
+      document.cookie = 'bmc_theme=' + theme + base;
     }
   }
 

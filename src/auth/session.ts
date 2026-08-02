@@ -20,7 +20,7 @@ import { findUserById, type User } from '../models/users.ts';
  * with Secure, Path=/ and no Domain — it cannot be overwritten by a sibling
  * subdomain. It requires HTTPS, so plain-HTTP deploys fall back to a bare name.
  */
-export const SESSION_COOKIE = config.cookieSecure ? '__Host-bm_session' : 'bm_session';
+export const SESSION_COOKIE = config.cookieSecure ? '__Host-bmc_session' : 'bmc_session';
 
 export interface Session {
   id: string;

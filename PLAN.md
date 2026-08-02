@@ -1,4 +1,4 @@
-# Battle Mapper — Implementation Plan
+# Battle Map Curator — Implementation Plan
 
 ## Context
 

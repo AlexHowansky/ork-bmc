@@ -12,7 +12,7 @@ import { config } from '../config.ts';
 import type { AppEnv } from '../types.ts';
 import { Layout, type Flash } from './Layout.tsx';
 
-const FLASH_COOKIE = 'bm_flash';
+const FLASH_COOKIE = 'bmc_flash';
 
 /**
  * Queues a one-shot message to show after a redirect. Stored in a short-lived

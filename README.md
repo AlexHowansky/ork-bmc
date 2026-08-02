@@ -1,4 +1,4 @@
-# Battle Mapper
+# Battle Map Curator
 
 A private, searchable library of battle maps for tabletop role-playing games.
 Upload map images, record the grid geometry so they drop into a virtual tabletop
@@ -145,7 +145,7 @@ The settings most worth reviewing:
 | Variable | Default | Purpose |
 |---|---|---|
 | `IMAGE_DIR` | `./data/images` | Where maps are stored. Must be outside `public/`. |
-| `DATABASE_PATH` | `./data/battlemapper.sqlite` | SQLite database file. |
+| `DATABASE_PATH` | `./data/bmc.sqlite` | SQLite database file. |
 | `MAX_UPLOAD_BYTES` | `25MB` | Largest accepted upload. Accepts a `KB`/`MB`/`GB` suffix. |
 | `IMAGE_FORMAT` | `webp` | How maps are stored: `webp`, `png` or `jpeg`. New uploads only. |
 | `IMAGE_QUALITY` | `95` | 1–100. JPEG always; WEBP unless lossless; PNG only below 100, as palette quantisation. |

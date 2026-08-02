@@ -1,4 +1,4 @@
-## Battle Mapper
+## Battle Map Curator
 
 You are a web development expert. You are designing a new web application. This
 document explains the requirements that must be adhered to.

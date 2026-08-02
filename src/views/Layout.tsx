@@ -136,7 +136,7 @@ export const Layout: FC<PropsWithChildren<LayoutProps>> = ({
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <meta name="robots" content="noindex, nofollow" />
-      <title>{title} · Battle Mapper</title>
+      <title>{title} · Battle Map Curator</title>
       <link rel="stylesheet" href={assetUrl('app.css')} />
       <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
       <script src={assetUrl('app.js')} defer></script>
@@ -154,7 +154,7 @@ export const Layout: FC<PropsWithChildren<LayoutProps>> = ({
         <div class="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
           <a href={user ? '/maps' : '/login'} class="flex items-center gap-2 text-lg font-bold tracking-tight">
             <span aria-hidden="true">🗺️</span>
-            <span>Battle Mapper</span>
+            <span>Battle Map Curator</span>
           </a>
 
           {user && (
