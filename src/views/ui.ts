@@ -39,6 +39,13 @@ export const inputInvalid =
 
 export const label = 'block text-sm font-medium text-stone-700 dark:text-stone-300';
 
+/** `accent-*` colours the tick itself, so the box needs no custom rendering. */
+export const checkbox =
+  'mt-0.5 size-4 shrink-0 rounded border-stone-300 accent-amber-600 focus-visible:outline-2 ' +
+  'focus-visible:outline-offset-2 focus-visible:outline-amber-600 dark:border-stone-600 dark:accent-amber-500';
+
+export const checkboxLabel = 'text-sm font-medium text-stone-700 dark:text-stone-300';
+
 export const hint = 'mt-1 text-xs text-stone-500 dark:text-stone-400';
 
 export const fieldError = 'mt-1 text-xs font-medium text-red-600 dark:text-red-400';

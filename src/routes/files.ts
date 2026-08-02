@@ -10,11 +10,13 @@ import { Hono, type Context } from 'hono';
 
 import { requireAdmin } from '../auth/middleware.ts';
 import type { ImageFormat } from '../config.ts';
-import { notFound } from '../errors.ts';
+import { notFound, tooManyRequests } from '../errors.ts';
 import { FORMAT_MIME_TYPES } from '../images/process.ts';
 import { imageFile, isValidUuid, STORAGE_EXTENSIONS } from '../images/storage.ts';
 import { findMap, type MapRecord } from '../models/maps.ts';
-import { findPendingUpload } from '../models/pendingUploads.ts';
+import { findPendingByShareToken, findPendingUpload } from '../models/pendingUploads.ts';
+import { findCandidate } from '../models/uploadCandidates.ts';
+import { clientIp, consumeToken } from '../security/ratelimit.ts';
 import type { AppEnv } from '../types.ts';
 
 export const fileRoutes = new Hono<AppEnv>();
@@ -44,6 +46,7 @@ async function serve(
   variant: 'full' | 'thumb',
   format: ImageFormat,
   disposition?: string,
+  overrides?: Record<string, string>,
 ): Promise<Response> {
   const file = imageFile(uuid, variant, format);
 
@@ -68,6 +71,7 @@ async function serve(
     'Cache-Control': 'private, max-age=3600',
   });
   if (disposition) headers.set('Content-Disposition', disposition);
+  for (const [name, value] of Object.entries(overrides ?? {})) headers.set(name, value);
 
   return new Response(file, { headers });
 }
@@ -87,6 +91,73 @@ fileRoutes.get('/i/pending/:uuid/thumb', async (c) => {
   if (!pending) throw notFound('That image is not waiting to be saved.');
 
   return serve(c, uuid, 'thumb', pending.format);
+});
+
+/**
+ * A candidate's preview, stored as bytes rather than as a file.
+ *
+ * The content security policy allows images from this origin only, so a
+ * thumbnail found on the web has to be served back out by this app. Scoped like
+ * the preview above: the staged upload must belong to the admin asking, and the
+ * candidate must belong to that upload.
+ */
+fileRoutes.get('/i/pending/:uuid/candidate/:id', async (c) => {
+  const uuid = c.req.param('uuid');
+  if (!isValidUuid(uuid)) throw notFound('That image is not waiting to be saved.');
+
+  const pending = findPendingUpload(uuid, c.get('user')!.id);
+  if (!pending) throw notFound('That image is not waiting to be saved.');
+
+  const id = Number(c.req.param('id'));
+  const candidate = Number.isInteger(id) ? findCandidate(id, uuid) : null;
+
+  if (!candidate?.thumb || !candidate.thumbFormat) throw notFound('That preview is not available.');
+
+  // A Blob rather than the array itself: the bytes come back from SQLite as a
+  // view onto its own buffer, and wrapping them hands the response something
+  // with a definite length and no borrowed memory behind it.
+  return new Response(new Blob([candidate.thumb]), {
+    headers: new Headers({
+      'Content-Type': FORMAT_MIME_TYPES[candidate.thumbFormat],
+      'Content-Length': String(candidate.thumb.byteLength),
+      'Cache-Control': 'private, max-age=3600',
+    }),
+  });
+});
+
+/**
+ * The staged image, for a search provider that has no session and never will.
+ *
+ * This is the one route in the app that can serve a full-resolution image to
+ * something that has not signed in, and it exists because reverse image search
+ * works by handing the provider an address to fetch. Its blast radius is kept
+ * to what that requires and no more: one upload that is not yet a map, held by
+ * a 256-bit token that is stored only as a hash, valid for minutes, revoked the
+ * moment the search it was minted for comes back, and never issued at all if the
+ * admin unticked the box on the upload form.
+ *
+ * A fixed path with the token in the query, not `/p/:token`, because
+ * `PUBLIC_PATHS` matches a path exactly — a parameterised public route would
+ * mean loosening deny-by-default for every route in the app to serve this one.
+ * `c.req.path` excludes the query string, so the token stays out of the logs.
+ */
+fileRoutes.get('/staged-image', async (c) => {
+  // The only unauthenticated reader of IMAGE_DIR, so it is also the only one
+  // that can be probed. A token is unguessable, but nothing is served for free.
+  if (!consumeToken(`staged-image:${clientIp(c)}`, { capacity: 120, windowSeconds: 300 })) {
+    throw tooManyRequests();
+  }
+
+  const token = c.req.query('t') ?? '';
+  const pending = token === '' ? null : findPendingByShareToken(token);
+
+  if (!pending) throw notFound('That image is not available.');
+
+  return serve(c, pending.uuid, 'full', pending.format, undefined, {
+    // Never held anywhere: the address stops working within minutes and the
+    // image behind it is not public in any other sense.
+    'Cache-Control': 'no-store',
+  });
 });
 
 fileRoutes.get('/i/:uuid/thumb', async (c) => {

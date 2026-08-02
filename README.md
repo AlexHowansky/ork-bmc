@@ -131,6 +131,27 @@ genuinely different maps land nowhere near each other.
 `FINGERPRINT_MAX_DISTANCE` sets how close counts as a match. Maps uploaded
 before this existed have no fingerprint and are never offered as matches.
 
+**Finding a better copy.** Battle maps are republished constantly, and the copy
+that reaches you is often not the largest one in circulation. If a search
+provider is configured, an upload is looked up on the web and any copy that is
+meaningfully bigger — and still the same shape — is offered beside it. Choosing
+one downloads it, checks its fingerprint really does match what you uploaded and
+that it really is larger once decoded, and puts it in place of your file. Your
+name, variant and tags stay as you typed them, and nothing joins the library
+until you save.
+
+The upload form carries a checkbox, ticked by default, that turns this off for a
+single upload. It is worth understanding what it controls: the search works by
+giving the provider an address it can fetch the image from, so while a search is
+running that one unsaved image is readable by whoever holds an unguessable
+token. Untick the box and no such address is ever issued.
+
+This is off unless `WEB_SEARCH_PROVIDER` is set. It needs an API key and a
+`PUBLIC_BASE_URL` the provider can actually reach, and the process refuses to
+start if either is missing or unusable. Only `serpapi` is implemented, whose
+free plan allows 250 searches a month — `WEB_SEARCH_MONTHLY_LIMIT` keeps you
+inside it, refilling continuously rather than resetting on a date.
+
 **Searching.** Search by name, by tags, or both. Tags are lowercase letters
 only, separated by spaces or commas. Multiple tags can be matched with *Any*
 (OR) or *All* (AND). Everything is case-insensitive, and a search is a
@@ -156,7 +177,11 @@ The settings most worth reviewing:
 | `TRUST_PROXY` | `false` | Enable behind a reverse proxy so `X-Forwarded-For` is honoured. |
 | `PAGE_SIZE` | `24` | Maps per page. |
 | `FINGERPRINT_MAX_DISTANCE` | `10` | Of 64 bits. How alike two maps must look to be reported as duplicates. |
-| `PENDING_UPLOAD_TTL_SECONDS` | `3600` | How long an upload awaiting duplicate confirmation is kept. |
+| `PENDING_UPLOAD_TTL_SECONDS` | `3600` | How long an upload awaiting confirmation is kept. |
+| `WEB_SEARCH_PROVIDER` | `none` | `none` or `serpapi`. Look for a higher-resolution copy of an upload. |
+| `SERPAPI_KEY` | — | Required once a provider is set. |
+| `PUBLIC_BASE_URL` | — | Required once a provider is set: the https origin it fetches staged images from. |
+| `WEB_SEARCH_MONTHLY_LIMIT` | `250` | Searches per rolling month, matching the free plan. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
 
 ## Security
@@ -170,6 +195,19 @@ The app follows the OWASP Top Ten. In brief:
   statically; the only readers are routes behind the auth middleware. Image
   paths are built from a UUID that has been pattern-matched first, so traversal
   is impossible by construction rather than by filtering.
+- **One route is an exception, and only when you enable it.** Reverse image
+  search works by giving the provider an address to fetch, so `/staged-image`
+  answers without a session. It serves one upload that is not yet a map, to
+  whoever presents a 256-bit token stored only as a SHA-256, for five minutes,
+  revoked the moment the search returns — and issued at all only when a provider
+  is configured *and* the admin left the box ticked. With `WEB_SEARCH_PROVIDER`
+  unset, no token is ever minted and the route can only answer 404.
+- **Images fetched from the web are treated as hostile.** A candidate URL is
+  https-only, its host is resolved and refused if any address is private,
+  loopback, link-local or otherwise internal, every redirect is re-checked the
+  same way, and the body is capped both by its declared length and by what
+  actually arrives. The bytes are then identified by their leading bytes and
+  fully re-encoded, exactly as an upload is.
 - **Passwords** are hashed with Argon2id at OWASP's recommended cost. Sign-in is
   rate limited per client *and* per account, and an unknown address costs the
   same time and yields the same message as a wrong password.
@@ -197,7 +235,7 @@ rather than opening a public issue.
 ## Development
 
 ```bash
-bun test          # 174 tests
+bun test          # 327 tests
 bun run typecheck # tsc --noEmit
 bun run css:watch # rebuild CSS on change
 ```
@@ -208,10 +246,11 @@ bun run css:watch # rebuild CSS on change
 src/
   config.ts     log.ts     errors.ts     server.tsx
   db/           schema and forward-only migrations
-  models/       users, maps, staged uploads, tag normalisation, search
+  models/       users, maps, staged uploads, upgrade candidates, tags, search
   auth/         password hashing, sessions, access-control middleware
   security/     CSRF, response headers, rate limiting
   images/       storage sharding, upload processing, grid geometry, fingerprints
+  websearch/    finding a higher-resolution copy, and fetching it safely
   routes/       auth, maps, admin, files, static
   views/        server-rendered components
 cli/user.ts     account management

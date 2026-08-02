@@ -61,13 +61,39 @@ bun run db:migrate
   bare `/maps`, which would only put the search back. Anything asserting a 200
   from `/maps` has to run before a search or after a clear.
 - **Adding a route makes it private by default.** Anything reachable while
-  signed out must be listed in `PUBLIC_PATHS` in `auth/middleware.ts`.
-- **A successful upload does not always redirect.** When the new image
-  fingerprints close to a map already in the library, `POST /maps/new` returns
-  200 with a confirmation form and a `pending_uploads` row; the map is created
-  by a second POST carrying `pendingUuid`. Tests that upload the same fixture
-  twice will hit this — `makeMapPng` paints a different map per call for that
-  reason, and takes a `seed` when a test wants a deliberate duplicate.
+  signed out must be listed in `PUBLIC_PATHS` in `auth/middleware.ts`, which
+  matches `c.req.path` *exactly* — a parameterised public route is not
+  expressible, and `/staged-image?t=…` puts its token in the query for precisely
+  that reason. Do not turn that set into prefix matching to avoid the problem.
+- **Every upload is staged, even the ordinary ones.** `createFromUpload` writes
+  a `pending_uploads` row before it asks anything about the image, then commits
+  and deletes it in the same request when there is nothing to report. So a clean
+  upload still 302s to the new map and leaves no row behind — but any code that
+  assumes a row means "duplicate" is wrong.
+- **A successful upload does not always redirect.** `POST /maps/new` returns 200
+  with a review form, and the map is created by a second POST carrying
+  `pendingUuid`, when either the image fingerprints close to a map already in
+  the library *or* a higher-resolution copy was found on the web. Tests that
+  upload the same fixture twice will hit the first — `makeMapPng` paints a
+  different map per call for that reason, and takes a `seed` when a test wants a
+  deliberate duplicate.
+- **`processUpload` writes to disk; `prepareUpload` does not.** Anything that
+  has to look at the result before committing to it — adopting a copy found on
+  the web reuses the staged UUID, so writing first would destroy the admin's own
+  file — must use `prepareUpload` and call `storeImage` itself. `rescaleStored`
+  withholds its buffers for the same reason.
+- **The web search must never fail an upload.** `findHigherResolution` in
+  `src/websearch/` catches everything and returns 0. It sits in the upload path,
+  and a provider having a bad day is not the admin's problem. Anything added
+  there keeps that property.
+- **`src/websearch/fetchImage.ts` is the only place that dereferences a URL the
+  app did not choose.** Candidate images go through it or not at all. Its DNS
+  resolver is injectable because resolution happens before `fetch`, so a stubbed
+  `globalThis.fetch` tests nothing about the guard.
+- **`SERPAPI_KEY` normalises to `serpapikey` in the log redaction pass**, which
+  strips `-` and `_`. That is why `src/log.ts` lists `serpapikey` and not just
+  `apikey`. The SerpApi request URL carries the key in a query parameter, so
+  that URL never goes into a log, an error, or a `cause`.
 
 ## Conventions
 
@@ -83,7 +109,11 @@ bun run db:migrate
   path that builds a path from anything else.
 - A staged upload's UUID travels through a hidden form field, so it is never
   treated as a capability: `findPendingUpload` scopes every lookup to the
-  uploader and to the TTL.
+  uploader and to the TTL. A candidate id is scoped to its staged upload the
+  same way.
+- The share token for `/staged-image` *is* a capability, and is handled like the
+  session token it is modelled on: `randomToken` to mint, only `hashToken`'s
+  output stored, looked up by hash so there is nothing to time-attack.
 
 ## Not implemented
 

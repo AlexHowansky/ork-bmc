@@ -8,8 +8,10 @@
 import { Hono, type Context } from 'hono';
 
 import { requireAdmin } from '../auth/middleware.ts';
-import { badRequest, notFound, validationFailed } from '../errors.ts';
-import { processUpload, rescaleStored } from '../images/process.ts';
+import { config } from '../config.ts';
+import { badRequest, isAppError, notFound, validationFailed } from '../errors.ts';
+import { isSimilar } from '../images/fingerprint.ts';
+import { prepareUpload, processUpload, rescaleStored } from '../images/process.ts';
 import { gridFromFilename, resolveGrid, type GridInput, type ResolvedGrid } from '../images/grid.ts';
 import { deleteImage, isValidUuid, storeImage } from '../images/storage.ts';
 import {
@@ -30,12 +32,18 @@ import {
   createPendingUpload,
   deletePendingUpload,
   findPendingUpload,
+  updatePendingImage,
   type PendingUpload,
 } from '../models/pendingUploads.ts';
+import { candidatesFor, findCandidate, type UploadCandidate } from '../models/uploadCandidates.ts';
 import type { AppEnv } from '../types.ts';
+import { findHigherResolution } from '../websearch/index.ts';
+import { fetchRemoteImage } from '../websearch/fetchImage.ts';
 import { DuplicateWarning } from '../views/DuplicateWarning.tsx';
+import type { Flash } from '../views/Layout.tsx';
 import { MapForm, storageDescription, type MapFormMode, type MapFormValues, type StagedUpload } from '../views/MapForm.tsx';
 import { page, setFlash } from '../views/render.tsx';
+import { UpgradeOffer } from '../views/UpgradeOffer.tsx';
 
 export const adminRoutes = new Hono<AppEnv>();
 
@@ -229,14 +237,16 @@ adminRoutes.get('/maps/new', (c) =>
 /**
  * Handles the upload form, in either of the two states it can be submitted from.
  *
- * A first submission carries a file. If its fingerprint does not resemble
- * anything in the library — the overwhelmingly common case — the map is created
- * and this behaves exactly as it always has. If it does, the processed image is
- * staged instead and the admin is shown what it matched, so they can decide
- * whether they meant to add a variant of a map they already have.
+ * A first submission carries a file. It is always staged first, and then two
+ * questions are asked of it: does it look like a map already in the library, and
+ * is there a better copy of it on the web. If neither turns anything up — the
+ * overwhelmingly common case — the map is created straight away and this behaves
+ * exactly as it always has, redirecting to the new map. If either does, the
+ * admin is shown what was found and nothing joins the library until they say so.
  *
- * A second submission carries `pendingUuid` instead of a file, and either
- * commits that staged upload or throws it away.
+ * A second submission carries `pendingUuid` instead of a file, and commits that
+ * staged upload, replaces its image with a copy found on the web, or throws it
+ * away.
  */
 adminRoutes.post('/maps/new', async (c) => {
   const body = await c.req.parseBody();
@@ -251,6 +261,9 @@ async function createFromUpload(c: Context<AppEnv>, body: Record<string, unknown
   const user = c.get('user')!;
 
   let values = emptyValues();
+  // Set the moment the image is on disk, so the catch below knows whether there
+  // is still an upload to come back to.
+  let pending: PendingUpload | null = null;
 
   try {
     // The file's name only, not its bytes: it is what an unnamed map is named
@@ -279,99 +292,151 @@ async function createFromUpload(c: Context<AppEnv>, body: Record<string, unknown
       values = { ...values, gridWidth: String(namedGrid.gridWidth), gridHeight: String(namedGrid.gridHeight) };
     }
 
+    const inputGrid = namedGrid ?? chooseGridInput(parsed);
     const bytes = new Uint8Array(await file.arrayBuffer());
-    const processed = await processUpload(bytes, { grid: namedGrid ?? chooseGridInput(parsed) });
+    const processed = await processUpload(bytes, { grid: inputGrid });
     const originalFilename = uploadedName || null;
 
-    const matches = findSimilarMaps(processed.fingerprint);
-    if (matches.length > 0) {
-      // Stage rather than commit: the admin is about to be shown the matches and
-      // may well want the name of one of them, which is no longer a choice once
-      // the row exists.
-      const pending = createPendingUpload({
-        uuid: processed.uuid,
-        userId: user.id,
-        fingerprint: processed.fingerprint,
-        gridSize: processed.grid.gridSize,
-        gridWidth: processed.grid.gridWidth,
-        gridHeight: processed.grid.gridHeight,
-        imageWidth: processed.imageWidth,
-        imageHeight: processed.imageHeight,
-        fileSize: processed.fileSize,
-        gridSource: processed.grid.source,
-        upscaleFactor: processed.grid.upscaleFactor,
-        originalFilename,
-        format: processed.format,
-      });
+    // Staged before anything is asked about it. Both questions below can take a
+    // while — one of them talks to a third party — and from here on the files on
+    // disk are accounted for by a row, so a request that dies partway through
+    // leaves an upload the sweep will reclaim rather than two orphaned files.
+    pending = createPendingUpload({
+      uuid: processed.uuid,
+      userId: user.id,
+      fingerprint: processed.fingerprint,
+      gridSize: processed.grid.gridSize,
+      gridWidth: processed.grid.gridWidth,
+      gridHeight: processed.grid.gridHeight,
+      imageWidth: processed.imageWidth,
+      imageHeight: processed.imageHeight,
+      fileSize: processed.fileSize,
+      gridSource: processed.grid.source,
+      upscaleFactor: processed.grid.upscaleFactor,
+      originalFilename,
+      format: processed.format,
+      inputGrid,
+    });
 
-      logger.info('upload staged as a possible duplicate', {
+    const matches = findSimilarMaps(processed.fingerprint);
+    const upgrades = await findHigherResolution(pending, { wanted: wantsWebSearch(body), logger });
+
+    if (matches.length > 0 || upgrades > 0) {
+      logger.info('upload held for review', {
         uuid: pending.uuid,
         fingerprint: pending.fingerprint,
         matches: matches.length,
-        nearest: matches[0]!.distance,
+        ...(matches[0] ? { nearest: matches[0].distance } : {}),
+        upgrades,
       });
 
-      return renderDuplicateWarning(c, pending, matches, {
-        ...values,
-        // The requirement: offer the matching map's name, so keeping it and
-        // adding a variant is the path of least resistance.
-        name: matches[0]!.map.name,
-        variant: '',
-        // Same reasoning for the tags: a new variant of a map already in the
-        // library wants the same tags, and retyping them by hand is how a
-        // variant ends up findable under a different set than its siblings.
-        tags: tagsFromMatches(values.tags, matches),
-      });
+      return renderReview(
+        c,
+        pending,
+        matches,
+        matches.length > 0
+          ? {
+              ...values,
+              // The requirement: offer the matching map's name, so keeping it and
+              // adding a variant is the path of least resistance.
+              name: matches[0]!.map.name,
+              variant: '',
+              // Same reasoning for the tags: a new variant of a map already in the
+              // library wants the same tags, and retyping them by hand is how a
+              // variant ends up findable under a different set than its siblings.
+              tags: tagsFromMatches(values.tags, matches),
+            }
+          : values,
+      );
     }
 
-    try {
-      const map = createMap({
-        uuid: processed.uuid,
-        format: processed.format,
-        name: parsed.name,
-        variant: parsed.variant,
-        tags: parsed.tags,
-        gridSize: processed.grid.gridSize,
-        gridWidth: processed.grid.gridWidth,
-        gridHeight: processed.grid.gridHeight,
-        gridSource: processed.grid.source,
-        upscaleFactor: processed.grid.upscaleFactor,
-        imageWidth: processed.imageWidth,
-        imageHeight: processed.imageHeight,
-        fileSize: processed.fileSize,
-        fingerprint: processed.fingerprint,
-        originalFilename,
-        uploadedBy: user.id,
-      });
+    const map = commitPending(c, pending, parsed);
 
-      logger.info('map created', {
-        uuid: map.uuid,
-        name: map.name,
-        variant: map.variant,
-        ...(namedGrid ? { gridFromFilename: `${namedGrid.gridWidth}x${namedGrid.gridHeight}` } : {}),
-      });
-      setFlash(c, {
-        kind: 'success',
-        message:
-          processed.grid.source === 'none'
-            ? `“${map.name}” was uploaded. No grid was recorded — edit the map to add one.`
-            : `“${map.name}” was uploaded.` +
-              // Say so, because the admin did not type these: they came from the
-              // file's own name and they are worth a glance before they stand.
-              (namedGrid ? ` Its ${namedGrid.gridWidth}×${namedGrid.gridHeight} grid was read from the file name.` : '') +
-              gridNote(processed.grid, map.imageWidth, map.imageHeight),
-      });
+    logger.info('map created', {
+      uuid: map.uuid,
+      name: map.name,
+      variant: map.variant,
+      ...(namedGrid ? { gridFromFilename: `${namedGrid.gridWidth}x${namedGrid.gridHeight}` } : {}),
+    });
+    setFlash(c, {
+      kind: 'success',
+      message:
+        processed.grid.source === 'none'
+          ? `“${map.name}” was uploaded. No grid was recorded — edit the map to add one.`
+          : `“${map.name}” was uploaded.` +
+            // Say so, because the admin did not type these: they came from the
+            // file's own name and they are worth a glance before they stand.
+            (namedGrid ? ` Its ${namedGrid.gridWidth}×${namedGrid.gridHeight} grid was read from the file name.` : '') +
+            gridNote(processed.grid, map.imageWidth, map.imageHeight),
+    });
 
-      return c.redirect(`/maps/${map.uuid}`, 302);
-    } catch (error) {
-      // The row was rejected (almost always a duplicate name/variant), so the
-      // files just written would otherwise be orphaned on disk.
-      await deleteImage(processed.uuid);
-      throw error;
-    }
+    return c.redirect(`/maps/${map.uuid}`, 302);
   } catch (error) {
-    return renderFormError(c, error, 'create', '/maps/new', values);
+    // Once the upload is staged, a rejected submission — almost always a name
+    // and variant the library already has — can come back as the confirmation
+    // form rather than an empty upload page. The file is still on disk and still
+    // accounted for, so there is no reason to make the admin go and find it
+    // again just to correct a variant.
+    return pending
+      ? renderFormError(c, error, 'confirm', '/maps/new', values, undefined, {
+          staged: stagedFrom(pending),
+          matches: findSimilarMaps(pending.fingerprint),
+          candidates: remainingCandidates(pending),
+        })
+      : renderFormError(c, error, 'create', '/maps/new', values);
   }
+}
+
+/** True unless the admin unticked the search box. An unticked box sends nothing. */
+const wantsWebSearch = (body: Record<string, unknown>): boolean => field(body, 'searchWeb') !== '';
+
+/**
+ * Turns a staged upload into a map, keeping the row until the map exists.
+ *
+ * The staged row is what accounts for the files on disk, so it is deleted only
+ * once `createMap` has succeeded. Everything measured from the image comes from
+ * the row rather than from the submission: by this point the pixels have been
+ * written, and possibly replaced by a copy found on the web, and the row is the
+ * only record of what they turned out to be.
+ */
+function commitPending(c: Context<AppEnv>, pending: PendingUpload, parsed: ParsedForm): MapRecord {
+  const map = createMap({
+    uuid: pending.uuid,
+    // The staged files are already on disk in this format; the row inherits it
+    // rather than reading IMAGE_FORMAT again, which may since have changed.
+    format: pending.format,
+    name: parsed.name,
+    variant: parsed.variant,
+    tags: parsed.tags,
+    gridSize: pending.gridSize,
+    gridWidth: pending.gridWidth,
+    gridHeight: pending.gridHeight,
+    gridSource: pending.gridSource,
+    upscaleFactor: pending.upscaleFactor,
+    imageWidth: pending.imageWidth,
+    imageHeight: pending.imageHeight,
+    fileSize: pending.fileSize,
+    fingerprint: pending.fingerprint,
+    originalFilename: pending.originalFilename,
+    uploadedBy: c.get('user')!.id,
+  });
+
+  deletePendingUpload(pending.uuid);
+
+  return map;
+}
+
+/**
+ * The offers still worth making about a staged upload.
+ *
+ * Filtered by size rather than by bookkeeping: adopting a copy makes the staged
+ * image that copy, so the one just taken is no longer bigger than itself and
+ * drops out on its own, along with anything else that has been overtaken.
+ */
+function remainingCandidates(pending: PendingUpload): UploadCandidate[] {
+  const stagedPixels = pending.imageWidth * pending.imageHeight;
+
+  return candidatesFor(pending.uuid).filter((candidate) => candidate.width * candidate.height > stagedPixels);
 }
 
 /**
@@ -408,6 +473,13 @@ async function resolveStagedUpload(c: Context<AppEnv>, body: Record<string, unkn
     return c.redirect('/maps/new', 302);
   }
 
+  // A submit button carries one name and one value, so the chosen copy travels
+  // inside the action rather than in a field of its own.
+  const adopting = /^adopt:(\d+)$/.exec(field(body, 'action'));
+  if (adopting?.[1]) {
+    return adoptCandidate(c, pending, Number(adopting[1]), body);
+  }
+
   const matches = findSimilarMaps(pending.fingerprint);
   let values = valuesFromPending(pending);
 
@@ -418,37 +490,17 @@ async function resolveStagedUpload(c: Context<AppEnv>, body: Record<string, unkn
     values = { ...formValues(body, fallbackName), ...gridValuesFromPending(pending) };
     const { parsed } = parseMapForm(body, fallbackName);
 
-    const map = createMap({
-      uuid: pending.uuid,
-      // The staged files are already on disk in this format; the row inherits it
-      // rather than reading IMAGE_FORMAT again, which may since have changed.
-      format: pending.format,
-      name: parsed.name,
-      variant: parsed.variant,
-      tags: parsed.tags,
-      gridSize: pending.gridSize,
-      gridWidth: pending.gridWidth,
-      gridHeight: pending.gridHeight,
-      gridSource: pending.gridSource,
-      upscaleFactor: pending.upscaleFactor,
-      imageWidth: pending.imageWidth,
-      imageHeight: pending.imageHeight,
-      fileSize: pending.fileSize,
-      fingerprint: pending.fingerprint,
-      originalFilename: pending.originalFilename,
-      uploadedBy: user.id,
-    });
-
-    // Only once the row is safely in: until this point the staged row is what
-    // keeps the files on disk accounted for.
-    deletePendingUpload(pending.uuid);
+    const map = commitPending(c, pending, parsed);
 
     logger.info('map created from staged upload', { uuid: map.uuid, name: map.name, variant: map.variant });
     setFlash(c, {
       kind: 'success',
-      message: `“${map.name}” was saved despite matching ${
-        matches.length === 1 ? 'an existing map' : `${matches.length} existing maps`
-      }.`,
+      message:
+        matches.length === 0
+          ? `“${map.name}” was saved.`
+          : `“${map.name}” was saved despite matching ${
+              matches.length === 1 ? 'an existing map' : `${matches.length} existing maps`
+            }.`,
     });
 
     return c.redirect(`/maps/${map.uuid}`, 302);
@@ -458,6 +510,111 @@ async function resolveStagedUpload(c: Context<AppEnv>, body: Record<string, unkn
     return renderFormError(c, error, 'confirm', '/maps/new', values, undefined, {
       staged: stagedFrom(pending),
       matches,
+      candidates: remainingCandidates(pending),
+    });
+  }
+}
+
+/**
+ * Swaps a staged upload's image for a higher-resolution copy found on the web.
+ *
+ * The staged UUID is kept, so the files are replaced where they already are and
+ * nothing downstream has to learn that the image changed. That is also why the
+ * new bytes are prepared but not written until they have been checked: the file
+ * being overwritten is the admin's own upload, and there would be no way back
+ * from writing first and finding out afterwards that the copy was a different
+ * map, or too large for the storage format to hold.
+ *
+ * Two things are verified before anything is written, and neither is taken on
+ * the provider's word. The fingerprint has to match what was staged, which is
+ * what turns "an index thought these look alike" into "this is the same map".
+ * And it has to be genuinely bigger once decoded, because a claimed resolution
+ * is often an upscale of the very image being replaced.
+ */
+async function adoptCandidate(
+  c: Context<AppEnv>,
+  pending: PendingUpload,
+  candidateId: number,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const logger = c.get('logger');
+
+  const candidate = findCandidate(candidateId, pending.uuid);
+
+  if (!candidate) {
+    throw notFound('That copy is no longer on offer. Please choose another, or save the map as it is.');
+  }
+
+  // Whatever happens, the admin comes back to the review page with their typing
+  // intact — this is a detour in the middle of filling in a form, not a new one.
+  const fallbackName = nameFromFilename(pending.originalFilename ?? '');
+  const values = { ...formValues(body, fallbackName), ...gridValuesFromPending(pending) };
+
+  try {
+    const bytes = await fetchRemoteImage(candidate.imageUrl, {
+      maxBytes: config.webSearch.maxDownloadBytes,
+      timeoutMs: config.webSearch.timeoutMs,
+    });
+
+    const prepared = await prepareUpload(bytes, {
+      uuid: pending.uuid,
+      // The admin's own claim about the grid, not the reading of it taken at the
+      // old resolution: "70 pixel squares" and "30 squares across" describe the
+      // staged image identically and this one differently.
+      grid: pending.inputGrid,
+      maxBytes: config.webSearch.maxDownloadBytes,
+    });
+
+    if (!isSimilar(prepared.fingerprint, pending.fingerprint)) {
+      throw badRequest('That copy turned out to be a different image, so it was not used.');
+    }
+
+    if (prepared.imageWidth * prepared.imageHeight <= pending.imageWidth * pending.imageHeight) {
+      throw badRequest(
+        `That copy is ${prepared.imageWidth}×${prepared.imageHeight} once decoded, which is no larger than what you uploaded.`,
+      );
+    }
+
+    await storeImage(pending.uuid, prepared.full, prepared.thumb, prepared.format);
+    updatePendingImage(pending.uuid, {
+      imageWidth: prepared.imageWidth,
+      imageHeight: prepared.imageHeight,
+      fileSize: prepared.fileSize,
+      fingerprint: prepared.fingerprint,
+      format: prepared.format,
+      gridSize: prepared.grid.gridSize,
+      gridWidth: prepared.grid.gridWidth,
+      gridHeight: prepared.grid.gridHeight,
+      gridSource: prepared.grid.source,
+      upscaleFactor: prepared.grid.upscaleFactor,
+    });
+
+    logger.info('staged upload replaced with a copy found on the web', {
+      uuid: pending.uuid,
+      source: candidate.source,
+      was: `${pending.imageWidth}x${pending.imageHeight}`,
+      now: `${prepared.imageWidth}x${prepared.imageHeight}`,
+    });
+
+    const updated = findPendingUpload(pending.uuid, c.get('user')!.id)!;
+
+    return renderReview(c, updated, findSimilarMaps(updated.fingerprint), values, {
+      kind: 'success',
+      message: `The image was replaced with a ${prepared.imageWidth}×${prepared.imageHeight} copy${
+        candidate.source ? ` from ${candidate.source}` : ''
+      }. Save the map to keep it.`,
+    });
+  } catch (error) {
+    // A copy that will not download is the ordinary case, not an emergency:
+    // hotlink protection, dead CDN links and geoblocking are all routine. The
+    // staged upload is untouched, so the admin can pick another or save as is.
+    if (!isAppError(error)) throw error;
+
+    logger.info('candidate could not be adopted', { uuid: pending.uuid, reason: error.userMessage });
+
+    return renderReview(c, pending, findSimilarMaps(pending.fingerprint), values, {
+      kind: 'error',
+      message: error.userMessage,
     });
   }
 }
@@ -484,21 +641,42 @@ const stagedFrom = (pending: PendingUpload): StagedUpload => ({
   gridHeight: pending.gridHeight,
 });
 
-/** The interstitial: what the upload matched, over a form that can commit it. */
-function renderDuplicateWarning(
+/**
+ * The interstitial: what was found out about the upload, over a form that can
+ * commit it.
+ *
+ * Reached for either of two reasons, and sometimes both at once — the image
+ * resembles a map already in the library, or a larger copy of it exists on the
+ * web. Each panel appears only when it has something to say, because a heading
+ * about zero matches is worse than no heading.
+ */
+function renderReview(
   c: Context<AppEnv>,
   pending: PendingUpload,
   matches: SimilarMap[],
   values: MapFormValues,
+  flash?: Flash,
 ): Response {
+  const candidates = remainingCandidates(pending);
+
   return page(
     c,
-    { title: 'Possible duplicate' },
+    {
+      title: matches.length > 0 ? 'Possible duplicate' : 'A better copy is available',
+      ...(flash ? { flash } : {}),
+    },
     <div class="mx-auto max-w-3xl">
       <h1 class="text-2xl font-bold tracking-tight">Upload a map</h1>
-      <div class="mt-6">
-        <DuplicateWarning matches={matches} />
-      </div>
+      {matches.length > 0 && (
+        <div class="mt-6">
+          <DuplicateWarning matches={matches} />
+        </div>
+      )}
+      {candidates.length > 0 && (
+        <div class="mt-6">
+          <UpgradeOffer candidates={candidates} staged={stagedFrom(pending)} />
+        </div>
+      )}
       <div class="mt-8">
         <MapForm
           mode="confirm"
@@ -638,7 +816,7 @@ function renderFormError(
   values: MapFormValues,
   map?: MapRecord,
   /** Present when the rejected submission was committing a staged upload. */
-  pending?: { staged: StagedUpload; matches: SimilarMap[] },
+  pending?: { staged: StagedUpload; matches: SimilarMap[]; candidates: UploadCandidate[] },
 ): Response {
   const isFieldError =
     error !== null && typeof error === 'object' && 'fields' in error && (error as { fields?: unknown }).fields;
@@ -661,11 +839,17 @@ function renderFormError(
       >
         {appError.userMessage}
       </div>
-      {/* The matches stay on screen: they are the reason the admin is being
-          asked for a variant in the first place. */}
-      {pending && (
+      {/* Whatever was found stays on screen: the matches are the reason the
+          admin is being asked for a variant in the first place, and a better
+          copy is still on offer after a name has been rejected. */}
+      {pending && pending.matches.length > 0 && (
         <div class="mt-6">
           <DuplicateWarning matches={pending.matches} />
+        </div>
+      )}
+      {pending && pending.candidates.length > 0 && (
+        <div class="mt-6">
+          <UpgradeOffer candidates={pending.candidates} staged={pending.staged} />
         </div>
       )}
       <div class="mt-8">

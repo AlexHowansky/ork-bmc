@@ -4,7 +4,19 @@ import type { FC } from 'hono/jsx';
 import { config } from '../config.ts';
 import { FORMAT_LABELS } from '../images/process.ts';
 import { CsrfInput } from './Layout.tsx';
-import { button, card, dropZone, dropZoneActive, fieldError, hint, input, inputInvalid, label } from './ui.ts';
+import {
+  button,
+  card,
+  checkbox,
+  checkboxLabel,
+  dropZone,
+  dropZoneActive,
+  fieldError,
+  hint,
+  input,
+  inputInvalid,
+  label,
+} from './ui.ts';
 
 export interface MapFormValues {
   name: string;
@@ -99,6 +111,41 @@ const Field: FC<{
   </div>
 );
 
+/** Names the form, so controls rendered elsewhere on the page can submit it. */
+export const FORM_ID = 'map-form';
+
+/**
+ * The opt-out for looking up a higher-resolution copy of the upload.
+ *
+ * Ticked by default, because the search is nearly always what an admin wants
+ * and because an unticked box submits nothing at all — the server reads the
+ * absence, which makes "on" the state that needs no explaining.
+ *
+ * Absent entirely when no provider is configured. A toggle for a feature that
+ * cannot run is worse than no toggle: it implies the search is happening.
+ *
+ * The hint says what unticking actually prevents. The search works by handing
+ * the provider an address it can fetch the image from, which is the one moment
+ * this app shows a full-resolution map to something that is not a signed-in
+ * user, and an admin deciding whether to allow it deserves to know that without
+ * having to go and read the documentation.
+ */
+const SearchWebField: FC = () =>
+  config.webSearch.provider === 'none' ? null : (
+    <div class="mt-4 flex items-start gap-3">
+      <input id="searchWeb" name="searchWeb" type="checkbox" value="1" checked class={checkbox} />
+      <div>
+        <label for="searchWeb" class={checkboxLabel}>
+          Look for a higher-resolution copy on the web
+        </label>
+        <p class={hint}>
+          The image is briefly made readable at an unguessable address so the search can see it. Untick this and it
+          is never shared, and the map is saved as uploaded.
+        </p>
+      </div>
+    </div>
+  );
+
 /** The grid the staged image was already processed against; not editable here. */
 const StagedGrid: FC<{ staged: StagedUpload }> = ({ staged }) =>
   staged.gridSize === null ? (
@@ -113,7 +160,10 @@ const StagedGrid: FC<{ staged: StagedUpload }> = ({ staged }) =>
   );
 
 export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, errors = {}, existing, staged }) => (
-  <form method="post" action={action} enctype="multipart/form-data" class="space-y-8">
+  // The id lets a submit button sit outside this form and still belong to it —
+  // the review page's "use this one" buttons live up in their own panel, but
+  // have to carry everything typed down here along with them.
+  <form id={FORM_ID} method="post" action={action} enctype="multipart/form-data" class="space-y-8">
     <CsrfInput token={csrfToken} />
     {/* Names the staged upload this submission commits. Server-side it is only
         honoured for the admin who staged it, and only until it ages out. */}
@@ -171,6 +221,7 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
             <p data-dropzone-message role="status" class={fieldError} />
           </div>
           {errors['image'] && <p class={fieldError}>{errors['image']}</p>}
+          <SearchWebField />
         </div>
       ) : (
         existing && (

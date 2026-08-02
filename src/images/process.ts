@@ -126,20 +126,36 @@ export interface ProcessOptions {
   grid: GridInput;
   /** Reuse an existing UUID (used when replacing the image on an existing map). */
   uuid?: string;
+  /** Ceiling on the input. Defaults to the upload limit; a web download has its own. */
+  maxBytes?: number;
+}
+
+/** A processed image that has not been written yet. */
+export interface PreparedImage extends ProcessedImage {
+  full: Uint8Array;
+  thumb: Uint8Array;
 }
 
 /**
- * Runs an uploaded file through the whole pipeline and writes it to disk.
+ * Runs a file through the whole pipeline but writes nothing.
+ *
+ * Separated from `processUpload` for the one caller that has to inspect the
+ * result before committing to it: adopting a higher-resolution copy found on the
+ * web reuses the staged UUID, so writing first would destroy the admin's own
+ * upload before its fingerprint could be compared — and there would be nothing
+ * to fall back to if the copy turned out to be a different map. `rescaleStored`
+ * below withholds its buffers for the same reason.
+ *
  * Throws `AppError` with a user-facing message for anything the admin can fix.
  */
-export async function processUpload(bytes: Uint8Array, options: ProcessOptions): Promise<ProcessedImage> {
+export async function prepareUpload(bytes: Uint8Array, options: ProcessOptions): Promise<PreparedImage> {
+  const maxBytes = options.maxBytes ?? config.maxUploadBytes;
+
   if (bytes.length === 0) {
     throw badRequest('That file is empty. Please choose an image.');
   }
-  if (bytes.length > config.maxUploadBytes) {
-    throw payloadTooLarge(
-      `That image is ${formatMb(bytes.length)}, over the ${formatMb(config.maxUploadBytes)} limit.`,
-    );
+  if (bytes.length > maxBytes) {
+    throw payloadTooLarge(`That image is ${formatMb(bytes.length)}, over the ${formatMb(maxBytes)} limit.`);
   }
 
   const format = sniffFormat(bytes);
@@ -199,8 +215,6 @@ export async function processUpload(bytes: Uint8Array, options: ProcessOptions):
   // reduction, so that enlargement makes almost no difference to it.
   const fingerprint = await fingerprintImage(full);
 
-  await storeImage(uuid, full, thumb, config.image.format);
-
   // Rotation can transpose the dimensions, so read them back from the encoded
   // output rather than assuming what went in.
   const finalMeta = await sharp(full).metadata();
@@ -230,7 +244,21 @@ export async function processUpload(bytes: Uint8Array, options: ProcessOptions):
     grid,
     fingerprint,
     format: config.image.format,
+    full,
+    thumb,
   };
+}
+
+/**
+ * Runs an uploaded file through the whole pipeline and writes it to disk.
+ * Throws `AppError` with a user-facing message for anything the admin can fix.
+ */
+export async function processUpload(bytes: Uint8Array, options: ProcessOptions): Promise<ProcessedImage> {
+  const { full, thumb, ...prepared } = await prepareUpload(bytes, options);
+
+  await storeImage(prepared.uuid, full, thumb, prepared.format);
+
+  return prepared;
 }
 
 export interface RescaledImage {
