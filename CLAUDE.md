@@ -62,6 +62,12 @@ bun run migrate
   have the browser block a submission carrying only an address. From the point
   the bytes are in hand the two are the same path — same limits, same staging,
   same duplicate check — so nothing downstream needs to know which happened.
+  There are three ways to fill the file input and only one of them is the file
+  button: `app.js` also gives it a dropped file and a pasted one, both through
+  `useFile`, which assigns `input.files` and fires a synthetic `change` because
+  assigning fires nothing. The server therefore has no notion of a paste at all,
+  and gets whatever name the browser put on the clipboard's file — usually
+  `image.png`, so a pasted map with no name typed becomes "Image".
 - **A map's storage format lives on its row, not in the config.** `IMAGE_FORMAT`
   decides what a *new* upload is encoded as; `maps.format` records what each one
   actually is, and that is what names the file on disk and sets the

@@ -8,8 +8,9 @@
  *   - Choosing a file names the map after it, and fills in square counts written
  *     into the file name. The server derives both from the file it receives, so
  *     this only makes them visible sooner.
- *   - The upload box accepts a dragged file, handing it to the ordinary file
- *     input so the form still posts in exactly the same way.
+ *   - The upload box accepts a dragged file, and the upload page accepts a
+ *     pasted image, both handing it to the ordinary file input so the form
+ *     still posts in exactly the same way.
  *   - Escape closes the full-size map view, which otherwise opens and closes
  *     entirely in CSS.
  *   - Server-rendered UTC timestamps are restated in the reader's own time zone.
@@ -188,7 +189,7 @@
   });
 
   // -------------------------------------------------------------------------
-  // Drag and drop onto the upload box
+  // Filling the file input from a drag or a paste
   // -------------------------------------------------------------------------
 
   function dropZoneOf(target) {
@@ -219,6 +220,49 @@
   function say(zone, message) {
     var element = zone.querySelector('[data-dropzone-message]');
     if (element) element.textContent = message;
+  }
+
+  /**
+   * Hands one file to the upload form's file input — assigning `files` is the
+   * only way a script can fill one in — and wakes the handlers watching it.
+   * `count` is how many were offered, so a drag or a paste carrying several can
+   * say which one it took. Shared by the drop and paste handlers below: from
+   * here on the two are the same thing, exactly as they are on the server.
+   */
+  function useFile(zone, file, count) {
+    var input = zone.querySelector('input[type="file"]');
+    if (!input) return;
+
+    // A pasted file is often nameless, so nothing said here can rely on one.
+    var quoted = file.name ? '“' + file.name + '”' : '';
+
+    // One map per upload; a second file would silently be ignored otherwise.
+    if (count > 1) {
+      say(zone, quoted ? 'Only one file at a time — using ' + quoted + '.' : 'Only one file at a time.');
+    } else {
+      say(zone, '');
+    }
+
+    // An empty type means the browser could not tell; let the server decide
+    // rather than refuse a file it would have accepted.
+    var accepted = (input.getAttribute('accept') || '').replace(/\s+/g, '').split(',');
+    if (file.type !== '' && accepted.indexOf(file.type) === -1) {
+      say(zone, (quoted || 'That') + ' is not a PNG, JPG or WEBP image.');
+      return;
+    }
+
+    try {
+      var transfer = new DataTransfer();
+      transfer.items.add(file);
+      input.files = transfer.files;
+    } catch (error) {
+      say(zone, 'This browser will not accept the file that way — please use the button instead.');
+      return;
+    }
+
+    // Assigning `files` fires nothing, and the name-from-file handler above is
+    // listening for a change.
+    input.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
   document.addEventListener('dragover', function (event) {
@@ -258,37 +302,78 @@
     event.preventDefault();
     highlight(zone, false);
 
-    var input = zone.querySelector('input[type="file"]');
-    var file = event.dataTransfer.files && event.dataTransfer.files[0];
-    if (!input || !file) return;
+    var files = event.dataTransfer.files;
+    if (!files || !files[0]) return;
 
-    // One map per upload; a second file would silently be ignored otherwise.
-    if (event.dataTransfer.files.length > 1) {
-      say(zone, 'Only one file at a time — using “' + file.name + '”.');
-    } else {
-      say(zone, '');
+    useFile(zone, files[0], files.length);
+  });
+
+  // -------------------------------------------------------------------------
+  // Pasting an image onto the upload page
+  // -------------------------------------------------------------------------
+
+  /** The first file on the clipboard, or null when it carries only text. */
+  function imageFrom(clipboardData) {
+    if (!clipboardData) return null;
+
+    var files = clipboardData.files;
+    if (files && files.length > 0) return files[0];
+
+    // Some browsers expose a pasted image through `items` alone.
+    var items = clipboardData.items || [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].kind !== 'file') continue;
+      var file = items[i].getAsFile();
+      if (file) return file;
     }
 
-    // An empty type means the browser could not tell; let the server decide
-    // rather than refuse a file it would have accepted.
-    var accepted = (input.getAttribute('accept') || '').replace(/\s+/g, '').split(',');
-    if (file.type !== '' && accepted.indexOf(file.type) === -1) {
-      say(zone, '“' + file.name + '” is not a PNG, JPG or WEBP image.');
-      return;
-    }
+    return null;
+  }
 
-    try {
-      var transfer = new DataTransfer();
-      transfer.items.add(file);
-      input.files = transfer.files;
-    } catch (error) {
-      say(zone, 'This browser will not accept a dropped file — please use the button instead.');
-      return;
+  /** Whether the clipboard also carries text, which a field is entitled to. */
+  function carriesText(clipboardData) {
+    var types = (clipboardData && clipboardData.types) || [];
+    for (var i = 0; i < types.length; i++) {
+      if (types[i] === 'text/plain') return true;
     }
+    return false;
+  }
 
-    // Assigning `files` fires nothing, and the name-from-file handler above is
-    // listening for a change.
-    input.dispatchEvent(new Event('change', { bubbles: true }));
+  // The input types that hold no text, so a paste over one is not typing.
+  var UNTYPEABLE = { file: 1, checkbox: 1, radio: 1, submit: 1, button: 1, reset: 1, range: 1, color: 1 };
+
+  /** Whether the paste landed somewhere the admin is writing. */
+  function editable(target) {
+    if (!target || !target.nodeName || !target.getAttribute) return false;
+
+    var element = target.nodeName.toLowerCase();
+    if (element === 'textarea') return true;
+    if (target.getAttribute('contenteditable') !== null) return true;
+    if (element !== 'input') return false;
+
+    var type = target.getAttribute('type');
+    return UNTYPEABLE[(type || 'text').toLowerCase()] !== 1;
+  }
+
+  // Ctrl+V anywhere on the upload page, so the box does not have to be found
+  // and clicked first. The box is only the marker for which page this is, and
+  // for where to say anything that needs saying.
+  document.addEventListener('paste', function (event) {
+    var zone = document.querySelector('[data-dropzone]');
+    if (!zone) return;
+
+    var file = imageFrom(event.clipboardData);
+    if (!file) return;
+
+    // Copying an image in a browser puts text on the clipboard beside it. In
+    // the address field that text is the whole point, so leave the paste alone
+    // and let the handler above name the map from it.
+    if (editable(event.target) && carriesText(event.clipboardData)) return;
+
+    event.preventDefault();
+
+    var files = event.clipboardData.files;
+    useFile(zone, file, files ? files.length : 1);
   });
 
   document.addEventListener('submit', function (event) {

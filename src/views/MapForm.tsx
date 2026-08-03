@@ -240,14 +240,19 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
           {/* Neither field is required on its own and the form needs one of
               them, which is a rule no single asterisk can state — so it is said
               once, here, and both fields are left unmarked. */}
-          <p class="text-sm text-stone-600 dark:text-stone-400">Choose a file, or paste the address of one.</p>
+          <p class="text-sm text-stone-600 dark:text-stone-400">
+            Choose a file, paste an image, or paste the address of one.
+          </p>
           <label for="image" class={`mt-4 ${label}`}>
             Map file
           </label>
           {/* `data-dropzone` marks the drop target for public/app.js, which
               hands anything dropped here to the file input below so the
-              ordinary form submission carries it. With JavaScript off this is
-              just a box around the file button, which still works. */}
+              ordinary form submission carries it. The paste handler is on the
+              document rather than on this box — it only looks for the box to
+              tell that this is the page with an upload on it, and for somewhere
+              to put its message. With JavaScript off this is just a box around
+              the file button, which still works. */}
           <div data-dropzone data-dropzone-active={dropZoneActive} class={`mt-1 ${dropZone}`}>
             {/* `data-name-from-file` is what public/app.js looks for, so it can
                 fill the name field in as soon as a file is chosen. */}
@@ -266,10 +271,11 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
               class="block w-full text-sm text-stone-600 file:mr-4 file:rounded-lg file:border-0 file:bg-amber-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-amber-500 dark:text-stone-400 dark:file:bg-amber-500 dark:file:text-stone-950"
             />
             <p id="image-hint" class={hint}>
-              PNG, JPG, or WEBP, up to {Math.floor(config.maxUploadBytes / (1024 * 1024))} MB — choose one, or drag it
-              onto this box. Stored as {storageDescription()}.
+              PNG, JPG, or WEBP, up to {Math.floor(config.maxUploadBytes / (1024 * 1024))} MB — choose one, drag it
+              onto this box, or paste one from the clipboard. Stored as {storageDescription()}.
             </p>
-            {/* Filled in by app.js when a drop cannot be used; empty otherwise. */}
+            {/* Filled in by app.js when a drop or a paste cannot be used; empty
+                otherwise. */}
             <p data-dropzone-message role="status" class={fieldError} />
           </div>
           {errors['image'] && <p class={fieldError}>{errors['image']}</p>}

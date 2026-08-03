@@ -51,6 +51,39 @@ function dragEvent(files: { name: string; type: string }[], target: unknown = zo
 
 const png = { name: 'sunken_temple.png', type: 'image/png' };
 
+/**
+ * Whether this page has an upload box on it. The drop handler learns that from
+ * the event's own target, but a paste is delegated on the document and has only
+ * the query to go on, so it has to be answerable both ways.
+ */
+let pageHasZone = true;
+
+/** The page body: somewhere a paste can land that is not a field. */
+const body = { nodeName: 'BODY', getAttribute: () => null };
+
+/** The address field, which is entitled to keep a paste of its own. */
+const addressField = {
+  nodeName: 'INPUT',
+  getAttribute: (name: string) => (name === 'type' ? 'url' : null),
+};
+
+/** A clipboard event, aimed at the page body unless told otherwise. */
+function pasteEvent(
+  files: { name: string; type: string }[],
+  types: string[] = ['Files'],
+  target: unknown = body,
+  items: { kind: string; getAsFile: () => unknown }[] = [],
+) {
+  return {
+    target,
+    clipboardData: { files, types, items },
+    prevented: false,
+    preventDefault(this: { prevented: boolean }) {
+      this.prevented = true;
+    },
+  };
+}
+
 /** The checkbox that CSS uses to hold the full-size map view open. */
 const lightbox = { checked: false };
 
@@ -82,7 +115,7 @@ beforeAll(async () => {
     querySelector: (selector: string) => {
       if (selector.indexOf('data-lightbox-toggle') !== -1) return lightbox.checked ? lightbox : null;
       // Otherwise: is there a drop zone on this page at all?
-      return zone;
+      return pageHasZone ? zone : null;
     },
     querySelectorAll: (selector: string) => (selector === '[data-local-time]' ? timestamps : []),
   };
@@ -113,6 +146,7 @@ function reset(): void {
   dispatched.length = 0;
   message.textContent = '';
   fileInput.files = null;
+  pageHasZone = true;
 }
 
 describe('the upload drop zone', () => {
@@ -174,6 +208,70 @@ describe('the upload drop zone', () => {
     handlers['drop']!(event);
 
     expect(event.prevented).toBe(true);
+    expect(fileInput.files).toBeNull();
+  });
+});
+
+describe('pasting an image', () => {
+  test('goes to the file input wherever on the page it lands', () => {
+    reset();
+    const event = pasteEvent([png]);
+    handlers['paste']!(event);
+
+    expect(event.prevented).toBe(true);
+    expect(fileInput.files).toHaveLength(1);
+    // Same as a drop from here on: the name-from-file handler needs telling.
+    expect(dispatched).toEqual(['change']);
+    expect(message.textContent).toBe('');
+  });
+
+  test('takes an image offered only through the clipboard items', () => {
+    reset();
+    handlers['paste']!(pasteEvent([], ['Files'], body, [{ kind: 'file', getAsFile: () => png }]));
+
+    expect(fileInput.files).toHaveLength(1);
+    expect(dispatched).toEqual(['change']);
+  });
+
+  test('leaves a paste of plain text alone', () => {
+    reset();
+    const event = pasteEvent([], ['text/plain']);
+    handlers['paste']!(event);
+
+    // Not claimed, so the paste still reaches whatever it was aimed at.
+    expect(event.prevented).toBe(false);
+    expect(fileInput.files).toBeNull();
+    expect(message.textContent).toBe('');
+  });
+
+  test('leaves the address field its own paste, image on the clipboard or not', () => {
+    reset();
+    // Copying an image in a browser puts the address on the clipboard beside
+    // it, and in that field the address is what was meant.
+    const event = pasteEvent([png], ['Files', 'text/plain'], addressField);
+    handlers['paste']!(event);
+
+    expect(event.prevented).toBe(false);
+    expect(fileInput.files).toBeNull();
+  });
+
+  test('refuses a pasted file the form does not accept, and says so', () => {
+    reset();
+    handlers['paste']!(pasteEvent([{ name: '', type: 'application/pdf' }]));
+
+    expect(fileInput.files).toBeNull();
+    expect(dispatched).toEqual([]);
+    // Nothing to quote back, so the message cannot name it.
+    expect(message.textContent).toBe('That is not a PNG, JPG or WEBP image.');
+  });
+
+  test('does nothing on a page with no upload box', () => {
+    reset();
+    pageHasZone = false;
+    const event = pasteEvent([png]);
+    handlers['paste']!(event);
+
+    expect(event.prevented).toBe(false);
     expect(fileInput.files).toBeNull();
   });
 });

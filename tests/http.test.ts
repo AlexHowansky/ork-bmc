@@ -358,6 +358,8 @@ describe('map lifecycle', () => {
 
     expect(html).toContain('data-dropzone');
     expect(html).toContain('data-dropzone-message');
+    // Pasting is invisible until something says it is there.
+    expect(html).toContain('paste one from the clipboard');
     // app.js reads the highlight classes from here rather than naming them, so
     // an empty attribute would leave a drop with no visible feedback.
     const active = html.match(/data-dropzone-active="([^"]+)"/);
@@ -378,6 +380,20 @@ describe('map lifecycle', () => {
     const uuid = uuidFromRedirect(response);
 
     expect(findMap(uuid)!.name).toBe('Lifecycle Sunken Temple 02');
+  });
+
+  test('a pasted image arrives as an ordinary upload', async () => {
+    // A paste puts the clipboard's file into the same file input a drop or the
+    // button fills, so nothing here can tell the difference — what marks it is
+    // the name a browser gives a clipboard bitmap, which the server derives
+    // from exactly as it would any other.
+    const response = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), await makeMapPng(), { name: '' }, 'image.png'),
+    );
+
+    expect(response.status).toBe(302);
+    expect(findMap(uuidFromRedirect(response))!.name).toBe('Image');
   });
 
   test('a name that was typed wins over the file name', async () => {
