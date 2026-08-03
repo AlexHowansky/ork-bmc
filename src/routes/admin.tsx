@@ -195,6 +195,25 @@ function tagsFromMatches(typed: string, matches: SimilarMap[]): string {
   return tags.slice(0, MAX_TAGS).join(' ');
 }
 
+/**
+ * Says where a grid the admin did not type came from, in the success flash.
+ *
+ * Worth a sentence in both cases: nobody entered these numbers, and they are
+ * about to stand as the map's grid, so the admin should get a chance to glance
+ * at them rather than discover them later.
+ */
+function gridOrigin(grid: ResolvedGrid, namedGrid: { gridWidth: number; gridHeight: number } | null): string {
+  if (namedGrid) {
+    return ` Its ${namedGrid.gridWidth}×${namedGrid.gridHeight} grid was read from the file name.`;
+  }
+
+  const measured = ` A ${grid.gridWidth}×${grid.gridHeight} grid of ${grid.gridSize}px squares was measured on the image`;
+
+  if (grid.source === 'detected') return `${measured}.`;
+  if (grid.source === 'estimated') return `${measured}, though not from much — please check it.`;
+  return '';
+}
+
 /** Explains a resize, or the refusal to do one, in the success flash. */
 function gridNote(grid: ResolvedGrid, width: number, height: number): string {
   if (grid.target) {
@@ -356,9 +375,7 @@ async function createFromUpload(c: Context<AppEnv>, body: Record<string, unknown
           processed.grid.source === 'none'
             ? `“${map.name}” was uploaded. No grid was recorded — edit the map to add one.`
             : `“${map.name}” was uploaded.` +
-              // Say so, because the admin did not type these: they came from the
-              // file's own name and they are worth a glance before they stand.
-              (namedGrid ? ` Its ${namedGrid.gridWidth}×${namedGrid.gridHeight} grid was read from the file name.` : '') +
+              gridOrigin(processed.grid, namedGrid) +
               gridNote(processed.grid, map.imageWidth, map.imageHeight),
       });
 

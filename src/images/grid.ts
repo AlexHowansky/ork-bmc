@@ -1,32 +1,25 @@
 /**
  * Grid geometry.
  *
- * ─────────────────────────────────────────────────────────────────────────────
- * AUTOMATIC DETECTION IS NOT IMPLEMENTED YET.
+ * Three ways to arrive at the same three numbers — pixels per square, squares
+ * across, squares down — in order of how much they are trusted:
  *
- * `detectGrid` is a stub that reports "no grid found". Everything around it is
- * finished and exercised: the upload path calls it, handles every branch of
- * `GridResult`, persists `grid_source` / `upscale_factor`, and the UI renders
- * the resulting states. Replacing the stub is a change to this one function —
- * no caller needs to move.
+ *   - what the admin typed, which is never second-guessed;
+ *   - square counts read out of the file name, which arrive as if typed;
+ *   - `detectGrid`, which measures the lines painted on the image itself.
  *
- * The intended approach, for whoever picks this up:
- *   1. Build per-column and per-row edge-energy projections from the greyscale
- *      buffer: colEnergy[x] = Σ_y |L(x+1,y) − L(x−1,y)|. Grid lines show up as
- *      periodic spikes.
- *   2. Detrend by subtracting a moving average, clamping negatives to zero, so
- *      broad luminance variation does not swamp the signal.
- *   3. Score candidate periods with a comb filter: for a real period p and
- *      phase φ, sum the interpolated energy at x = φ + k·p, normalised. Scan
- *      integer p over [GRID_MIN_PX, GRID_MAX_PX], then refine p and φ
- *      continuously for sub-pixel accuracy.
- *   4. Confidence = peak score ÷ median score, against GRID_MIN_CONFIDENCE.
- *   5. Reconcile the two axes — squares are square — then hand the result to
- *      `solveIntegerUpscale` below, which is already written and tested.
- * ─────────────────────────────────────────────────────────────────────────────
+ * `resolveGrid` is the entry point that applies that order and fills in
+ * whatever the winner leaves undetermined. Where a grid does not divide the
+ * image into whole pixels, `solveIntegerUpscale` finds the smallest enlargement
+ * that makes it, and the caller resizes the file to suit.
+ *
+ * Detection is consulted on upload only, and only when there is nothing else to
+ * go on. It runs on a greyscale plane the caller prepares; the signal
+ * processing lives in `gridDetect.ts`.
  */
 import { config } from '../config.ts';
 import { validationFailed } from '../errors.ts';
+import { edgeEnergy, measureAxis } from './gridDetect.ts';
 
 /** How the stored grid values were arrived at. */
 export type GridSource = 'none' | 'user' | 'detected' | 'estimated';
@@ -48,14 +41,121 @@ export interface RawImage {
 }
 
 /**
+ * The most two measured axes may disagree about the size of a square.
+ *
+ * Looser than the tolerance applied to counts an admin typed, because these are
+ * measurements: a line a pixel wide on a map that was scanned slightly askew
+ * reads a fraction of a percent differently across than down.
+ */
+const DETECTED_AGREEMENT_PX = 1;
+const DETECTED_AGREEMENT_RATIO = 0.03;
+
+/**
+ * The fewest squares a detected grid may claim on either axis.
+ *
+ * A "grid" of two squares across is a picture with a line down the middle of it.
+ */
+const MIN_DETECTED_SQUARES = 3;
+
+/** The most a measurement may be nudged to reach a whole number of pixels. */
+const SNAP_LIMIT_PX = 0.5;
+
+/**
+ * Rounds a measured square size that is only fractional because measuring is.
+ *
+ * A grid measured at 50.005px is a 50px grid. Left alone, that five-thousandth
+ * of a pixel would send `solveIntegerUpscale` looking for the next whole number
+ * and come back asking to enlarge the map by two per cent — a real change to the
+ * stored file, made on the strength of nothing.
+ *
+ * How much slack to allow follows from how the number was arrived at. The period
+ * is fitted across every line found, so an error of a pixel in placing the first
+ * and last of them divides by the number of gaps between: plenty of lines means
+ * a figure worth believing to a hundredth, four lines means barely to a third.
+ * Never more than half a pixel, though, or a grid that genuinely falls between
+ * two whole numbers would be rounded to one of them.
+ */
+function snapToWhole(measured: number, teeth: number): number {
+  const tolerance = Math.min(SNAP_LIMIT_PX, 2 / Math.max(1, teeth - 1));
+  const whole = Math.round(measured);
+  return whole >= 1 && Math.abs(measured - whole) <= tolerance ? whole : measured;
+}
+
+/**
  * Looks for a painted grid in a greyscale image.
  *
- * STUB: always reports no grid. See the module comment for the intended
- * implementation. Returning 'none' is the correct conservative answer — the
- * admin is asked to fill the values in by hand.
+ * `raw` may be a downscaled copy of the image, which is how the upload path
+ * keeps the cost of this bounded; `image` is the size the answer should be
+ * expressed in, and defaults to the plane itself when they are the same thing.
+ *
+ * Reporting no grid is always an acceptable answer, and is the one given
+ * whenever the evidence is thin: nothing repeats convincingly, the two axes
+ * contradict each other, or the spacing implies a grid too coarse to be one.
+ * The admin is then asked to fill the values in by hand, exactly as before.
  */
-export function detectGrid(_raw: RawImage): GridResult {
-  return { source: 'none' };
+export function detectGrid(raw: RawImage, image: { width: number; height: number } = raw): GridResult {
+  const bounds = {
+    minPx: config.grid.minPx,
+    maxPx: config.grid.maxPx,
+    minConfidence: config.grid.minConfidence,
+  };
+
+  const columns = measureAxis(edgeEnergy(raw, 'columns'), bounds);
+  const rows = measureAxis(edgeEnergy(raw, 'rows'), bounds);
+
+  // Each period is taken back into the coordinates of the image being
+  // described, which is not the plane that was measured when it was downscaled.
+  const across = columns && {
+    size: columns.period * (image.width / raw.width),
+    weight: columns.confidence,
+    teeth: columns.teeth,
+  };
+  const down = rows && {
+    size: rows.period * (image.height / raw.height),
+    weight: rows.confidence,
+    teeth: rows.teeth,
+  };
+
+  let solved: UpscaleSolution;
+
+  if (across && down) {
+    // Squares are square. Two confident axes that disagree are not measuring
+    // the same thing, and there is no way to tell which one is right.
+    const tolerance = Math.max(DETECTED_AGREEMENT_PX, Math.max(across.size, down.size) * DETECTED_AGREEMENT_RATIO);
+    if (Math.abs(across.size - down.size) > tolerance) return { source: 'none' };
+
+    const measured = (across.size * across.weight + down.size * down.weight) / (across.weight + down.weight);
+    // The rougher of the two readings is what limits the precision of the pair.
+    solved = solveIntegerUpscale(
+      snapToWhole(measured, Math.min(across.teeth, down.teeth)),
+      image.width,
+      image.height,
+    );
+  } else if (across ?? down) {
+    // Enlarging the file is a real change to what the admin uploaded, and one
+    // axis saying so is not enough to justify it. The square size is recorded
+    // rounded and the image is left as it arrived — the same bargain
+    // `solveIntegerUpscale` strikes when its own caps refuse an enlargement.
+    solved = { factor: 1, gridSize: Math.max(1, Math.round((across ?? down)!.size)), estimated: true };
+  } else {
+    return { source: 'none' };
+  }
+
+  const gridWidth = Math.max(1, Math.round((image.width * solved.factor) / solved.gridSize));
+  const gridHeight = Math.max(1, Math.round((image.height * solved.factor) / solved.gridSize));
+
+  if (gridWidth < MIN_DETECTED_SQUARES || gridHeight < MIN_DETECTED_SQUARES) return { source: 'none' };
+
+  return {
+    gridSize: solved.gridSize,
+    gridWidth,
+    gridHeight,
+    // Only a reading both axes agree on is reported as a measurement. One axis
+    // alone, or a square size that had to be rounded, is offered for the admin
+    // to check.
+    source: solved.estimated ? 'estimated' : 'detected',
+    upscaleFactor: solved.factor,
+  };
 }
 
 export interface UpscaleSolution {
@@ -296,14 +396,15 @@ export interface ResolvedGrid {
 
 /**
  * Works out the grid geometry to store, combining what the admin typed with
- * what can be derived and — once implemented — what can be detected.
+ * what can be derived and what can be detected.
  *
  * Anything the admin supplied is authoritative and is never second-guessed.
  * Missing values are filled by arithmetic where the supplied ones allow it,
  * because a grid size and an image width already determine the column count.
  * A square count goes through `fitGridToCounts`, which can ask for the image to
  * be enlarged so the count divides it exactly. Detection is consulted only when
- * there is nothing to derive from.
+ * there is nothing to derive from, and only when the caller supplies a plane to
+ * measure — omitting `raw` is how the edit path opts out of it.
  */
 export function resolveGrid(input: GridInput, image: { width: number; height: number }, raw?: RawImage): ResolvedGrid {
   const { gridSize, gridWidth, gridHeight } = input;
@@ -334,8 +435,8 @@ export function resolveGrid(input: GridInput, image: { width: number; height: nu
     };
   }
 
-  // Nothing supplied: this is where detection would contribute.
-  const detected = raw ? detectGrid(raw) : ({ source: 'none' } as const);
+  // Nothing supplied: measure the image itself, if the caller gave us pixels.
+  const detected = raw ? detectGrid(raw, image) : ({ source: 'none' } as const);
 
   if (detected.source === 'none') {
     return {

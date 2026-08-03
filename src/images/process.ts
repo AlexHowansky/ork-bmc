@@ -22,6 +22,7 @@ import {
   resolveGrid,
   solveIntegerUpscale,
   type GridInput,
+  type RawImage,
   type ResolvedGrid,
   type TargetSize,
 } from './grid.ts';
@@ -174,7 +175,17 @@ export async function processUpload(bytes: Uint8Array, options: ProcessOptions):
   // Decide the grid before encoding, because a fractional grid size — whether
   // counted by the admin or detected — calls for an upscale that changes the
   // dimensions written to disk.
-  const grid = resolveGrid(options.grid, { width: sourceWidth, height: sourceHeight });
+  //
+  // The plane for the detector is only worth decoding when there is nothing to
+  // detect *from*: a grid the admin typed, or one read out of the file name,
+  // outranks anything measured and `resolveGrid` would not look at it.
+  const { gridSize, gridWidth, gridHeight } = options.grid;
+  const analysis =
+    gridSize === undefined && gridWidth === undefined && gridHeight === undefined
+      ? await analysisPlane(bytes, sourceWidth, sourceHeight)
+      : undefined;
+
+  const grid = resolveGrid(options.grid, { width: sourceWidth, height: sourceHeight }, analysis);
 
   const outputWidth = grid.target?.width ?? sourceWidth;
   const outputHeight = grid.target?.height ?? sourceHeight;
@@ -219,6 +230,9 @@ export async function processUpload(bytes: Uint8Array, options: ProcessOptions):
     imageHeight,
     upscaleFactor: grid.upscaleFactor,
     gridSource: grid.source,
+    // Distinguishes "the detector found nothing" from "there was nothing to
+    // detect, because the grid was given".
+    gridAnalysed: analysis !== undefined,
     fingerprint,
   });
 
@@ -296,6 +310,37 @@ export async function rescaleStored(uuid: string, target: TargetSize, format: Im
     fileSize: full.length,
     fingerprint,
   };
+}
+
+/**
+ * Decodes a greyscale plane for the grid detector.
+ *
+ * Colour tells the detector nothing — a grid line is a line whatever it is
+ * painted in — and the work of scanning candidate periods grows with the
+ * longest side, so anything past GRID_ANALYSIS_MAX_DIM is reduced first. The
+ * measurement is scaled back afterwards, which is why the dimensions come from
+ * `resolveWithObject` rather than from what was asked for: a rounded-down
+ * output would put the answer out by that fraction.
+ *
+ * `fit: 'fill'` because the two axes are measured independently, so there is
+ * nothing to be gained by preserving the aspect ratio, and no `.rotate()`
+ * because the grid on a photograph is square whichever way up it was taken.
+ */
+async function analysisPlane(bytes: Uint8Array, width: number, height: number): Promise<RawImage> {
+  const scale = Math.min(1, config.grid.analysisMaxDim / Math.max(width, height));
+
+  const { data, info } = await sharp(bytes, { limitInputPixels: config.maxImagePixels })
+    .greyscale()
+    .resize({
+      width: Math.max(1, Math.round(width * scale)),
+      height: Math.max(1, Math.round(height * scale)),
+      fit: 'fill',
+      kernel: 'lanczos3',
+    })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  return { data, width: info.width, height: info.height };
 }
 
 /**

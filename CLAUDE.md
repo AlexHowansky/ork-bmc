@@ -85,12 +85,24 @@ bun run db:migrate
   treated as a capability: `findPendingUpload` scopes every lookup to the
   uploader and to the TTL.
 
-## Not implemented
+## Automatic grid detection
 
-Automatic grid detection. `src/images/grid.ts` is a stub returning
-`{ source: 'none' }` behind the final interface; the upload path, schema
-columns, and UI states around it are complete. The module comment describes the
-intended algorithm, and `solveIntegerUpscale` — the capped upscale solver the
-detector will hand its result to — is written, tested, and already in use: it is
-what `fitGridToCounts` calls when an admin's square counts do not divide the
-image evenly, on upload and on an edit that changes them.
+Runs on **upload only**, and only when all three grid fields are empty —
+`resolveGrid` consults it last, after anything typed and anything read from the
+file name. The edit path deliberately passes no plane, so clearing the fields
+and saving does not re-measure. Every `config.grid.*` setting is live.
+
+- `src/images/gridDetect.ts` is the signal processing: edge-energy projections,
+  a comb filter over candidate periods, sub-pixel refinement. Pure arithmetic
+  over a `RawImage`, no sharp, testable on a hand-built buffer.
+- `detectGrid` in `grid.ts` turns a measurement into a grid: reconcile the axes,
+  snap a near-whole square size, hand it to `solveIntegerUpscale`.
+- `analysisPlane` in `process.ts` is the only part that touches sharp. It may
+  hand `detectGrid` a **downscaled** plane, which is why `detectGrid` takes the
+  real image size as a second argument — a period measured on the plane means
+  nothing without it.
+
+Two things to know before changing the fixtures: **`makeMapPng` paints a grid
+the detector finds**, so a test that wants an ungridded upload has to use
+`makePlainPng`; and `paintGridPlane` is the greyscale builder for detector
+tests, with anti-aliased lines so fractional periods can be painted honestly.

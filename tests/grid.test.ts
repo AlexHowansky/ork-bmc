@@ -1,9 +1,7 @@
 /**
- * Grid geometry.
- *
- * Automatic detection is deferred, so these cover the parts that exist: the
- * capped integer-upscale solver, and the arithmetic that fills in whichever
- * values the admin did not type. Detector tests arrive with the detector.
+ * Grid geometry: the capped integer-upscale solver, the arithmetic that fills in
+ * whichever values the admin did not type, and what `detectGrid` makes of a
+ * measurement. The measuring itself is in `gridDetect.test.ts`.
  */
 import { describe, expect, test } from 'bun:test';
 
@@ -15,11 +13,64 @@ import {
   solveIntegerUpscale,
 } from '../src/images/grid.ts';
 import { isAppError } from '../src/errors.ts';
+import { paintGridPlane } from './helpers.ts';
 
-describe('detectGrid (stub)', () => {
+describe('detectGrid', () => {
+  test('measures a grid both axes agree on', () => {
+    expect(detectGrid(paintGridPlane(1000, 800, 50))).toEqual({
+      gridSize: 50,
+      gridWidth: 20,
+      gridHeight: 16,
+      source: 'detected',
+      upscaleFactor: 1,
+    });
+  });
+
   test('reports no grid, which is the conservative answer', () => {
-    const raw = { data: new Uint8Array(100 * 100), width: 100, height: 100 };
-    expect(detectGrid(raw)).toEqual({ source: 'none' });
+    expect(detectGrid({ data: new Uint8Array(100 * 100), width: 100, height: 100 })).toEqual({ source: 'none' });
+    expect(detectGrid(paintGridPlane(1000, 800, null))).toEqual({ source: 'none' });
+  });
+
+  test('answers in the coordinates of the image, not of the plane measured', () => {
+    // Half-size plane, so every period measured on it is half what the image has.
+    const result = detectGrid(paintGridPlane(500, 400, 25), { width: 1000, height: 800 });
+    expect(result).toMatchObject({ gridSize: 50, gridWidth: 20, gridHeight: 16, source: 'detected' });
+  });
+
+  test('asks for the enlargement that makes a measured square whole', () => {
+    // 70.4px squares cannot be stored as they are; 71px can, for 0.9% more image.
+    const result = detectGrid(paintGridPlane(1000, 800, 70.4));
+    expect(result).toMatchObject({ gridSize: 71, source: 'detected' });
+    expect('upscaleFactor' in result && result.upscaleFactor).toBeCloseTo(71 / 70.4, 2);
+  });
+
+  test('does not ask for an enlargement on the strength of a rounding error', () => {
+    // Measuring is not exact, and a square that comes back 50.005px across is a
+    // 50px square — not grounds for growing the file by two per cent.
+    expect(detectGrid(paintGridPlane(1000, 800, 50))).toMatchObject({ gridSize: 50, upscaleFactor: 1 });
+  });
+
+  test('declines when the two axes contradict each other', () => {
+    // Squares are square, so 40 across and 60 down cannot both be right.
+    expect(detectGrid(paintGridPlane(1000, 800, 40, { periodY: 60 }))).toEqual({ source: 'none' });
+  });
+
+  test('offers a single measurable axis for checking rather than as fact', () => {
+    // Horizontal lines only: the spacing is real, but nothing corroborates it.
+    const result = detectGrid(paintGridPlane(1000, 800, null, { periodY: 50 }));
+    expect(result).toMatchObject({ gridSize: 50, source: 'estimated' });
+  });
+
+  test('never enlarges the image on the word of one axis', () => {
+    // 47.5px squares would divide 1000px exactly at 48, and a corroborated
+    // reading would ask for that. One axis is not enough to grow the file over.
+    const result = detectGrid(paintGridPlane(1000, 800, null, { periodY: 47.5 }));
+    expect(result).toMatchObject({ gridSize: 48, source: 'estimated', upscaleFactor: 1 });
+  });
+
+  test('declines a spacing that would leave too few squares to be a grid', () => {
+    // 400px squares on a plane 120px wide is not a grid, it is a stripe.
+    expect(detectGrid(paintGridPlane(120, 2000, null, { periodY: 400 }))).toEqual({ source: 'none' });
   });
 });
 
@@ -208,9 +259,18 @@ describe('resolveGrid', () => {
     });
   });
 
-  test('with nothing supplied, the stub detector still yields no grid', () => {
-    const raw = { data: new Uint8Array(image.width * image.height), ...image };
-    expect(resolveGrid({}, image, raw).source).toBe('none');
+  test('with nothing supplied, a plane with no grid on it yields no grid', () => {
+    expect(resolveGrid({}, image, paintGridPlane(image.width, image.height, null)).source).toBe('none');
+  });
+
+  test('with nothing supplied, a plane with a grid on it is measured', () => {
+    const raw = paintGridPlane(image.width, image.height, 50);
+    expect(resolveGrid({}, image, raw)).toMatchObject({ gridSize: 50, source: 'detected', target: null });
+  });
+
+  test('a grid the admin typed is never displaced by one that could be measured', () => {
+    const raw = paintGridPlane(image.width, image.height, 50);
+    expect(resolveGrid({ gridSize: 70 }, image, raw)).toMatchObject({ gridSize: 70, source: 'user' });
   });
 });
 

@@ -109,9 +109,22 @@ enlargement since upload. Counts that disagree about how big a square is are
 rejected rather than stretched, and an enlargement beyond `GRID_MAX_UPSCALE` or
 `MAX_IMAGE_PIXELS` is declined, leaving the grid size rounded as before.
 
-> Automatic grid detection is specified but **not yet implemented**. Maps
-> uploaded with the grid fields blank are saved with no grid recorded, and can
-> be edited later to add one. See `src/images/grid.ts`.
+Upload a map with all three fields blank and no square counts in its name, and
+the grid is measured off the image itself. A painted grid is the one thing on a
+map that repeats, so it shows up as a regular spacing in the gradient summed
+down each column and across each row, and the spacing that best fits those is
+the size of a square. The map's page reports where the numbers came from:
+*Detected automatically* when both axes were measured and agreed, *Estimated —
+please check* when only one of them could be read or the square size had to be
+rounded. Where nothing convincing is found — no grid, one too faint to read, or
+a texture too fine to be one — the map is saved with no grid recorded and can be
+edited later to add one, as before.
+
+Detection runs on upload only, and never overrides anything: a value typed into
+the form or read out of the file name is used as given. `GRID_MIN_PX` and
+`GRID_MAX_PX` bound the square sizes it will consider, `GRID_MIN_CONFIDENCE` how
+far a spacing must stand out from the alternatives before it is believed, and
+`GRID_ANALYSIS_MAX_DIM` how far a large image is reduced before it is measured.
 
 **Variants.** A variant is an alternate version of the same map — `day`,
 `night`, `flooded`. Maps sharing a name are linked to each other, and each

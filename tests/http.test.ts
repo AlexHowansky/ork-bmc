@@ -11,7 +11,16 @@ import { hammingDistance } from '../src/images/fingerprint.ts';
 import { FORMAT_LABELS, FORMAT_MIME_TYPES } from '../src/images/process.ts';
 import { fullImagePath, STORAGE_EXTENSIONS, thumbImagePath } from '../src/images/storage.ts';
 import { createMap, findMap } from '../src/models/maps.ts';
-import { Client, ensureSchema, makeMapPng, makeUser, signedInAs, uploadForm, uuidFromRedirect } from './helpers.ts';
+import {
+  Client,
+  ensureSchema,
+  makeMapPng,
+  makePlainPng,
+  makeUser,
+  signedInAs,
+  uploadForm,
+  uuidFromRedirect,
+} from './helpers.ts';
 
 /** The escaped form a Tailwind class name takes inside a CSS selector. */
 const escapeClassName = (name: string): string => name.replace(/[:/.[\]%]/g, (char) => `\\${char}`);
@@ -423,9 +432,11 @@ describe('map lifecycle', () => {
   });
 
   test('a resolution in the file name is not mistaken for a grid', async () => {
+    // A gridless image, so that nothing the detector finds can stand in for the
+    // file name having been read.
     const response = await admin.post(
       '/maps/new',
-      uploadForm(await admin.csrfToken(), await makeMapPng(), { name: '' }, 'Lifecycle Resolution 1920x1080.png'),
+      uploadForm(await admin.csrfToken(), await makePlainPng(), { name: '' }, 'Lifecycle Resolution 1920x1080.png'),
     );
 
     const map = findMap(uuidFromRedirect(response))!;
@@ -436,10 +447,29 @@ describe('map lifecycle', () => {
   test('a map uploaded with no grid says so and offers to add one', async () => {
     const response = await admin.post(
       '/maps/new',
-      uploadForm(await admin.csrfToken(), await makeMapPng(), { name: 'Lifecycle No Grid' }),
+      uploadForm(await admin.csrfToken(), await makePlainPng(), { name: 'Lifecycle No Grid' }),
     );
     const html = await (await admin.get(`/maps/${uuidFromRedirect(response)}`)).text();
     expect(html).toContain('No grid recorded');
+  });
+
+  test('a grid nobody mentioned is measured off the image itself', async () => {
+    const response = await admin.post(
+      '/maps/new',
+      uploadForm(await admin.csrfToken(), await makeMapPng(1000, 800, 50), { name: 'Lifecycle Detected Grid' }),
+    );
+
+    expect(findMap(uuidFromRedirect(response))!).toMatchObject({
+      gridSize: 50,
+      gridWidth: 20,
+      gridHeight: 16,
+      gridSource: 'detected',
+    });
+
+    const html = await (await admin.get(`/maps/${uuidFromRedirect(response)}`)).text();
+    expect(html).toContain('Detected automatically');
+    // Nobody typed these, so the flash says where they came from.
+    expect(html).toContain('20×16 grid of 50px squares was measured on the image');
   });
 
   test('editing can add a grid afterwards', async () => {
@@ -753,6 +783,25 @@ describe('duplicate detection', () => {
     // And the name field is pre-filled from it, not from what was typed.
     expect(html).toContain('value="Sunken Chapel"');
     expect(html).not.toContain('Something Else Entirely');
+  });
+
+  test('a grid measured before the hold survives the confirmation', async () => {
+    // The staged row is authoritative for geometry, so a grid nobody typed has
+    // to make it across the two submissions intact.
+    const image = await makeMapPng(1000, 800, 50);
+    expect((await upload(admin, image, { name: 'Staged Grid First' })).status).toBe(302);
+
+    const held = await upload(admin, image, { name: 'Staged Grid Second' });
+    const html = await held.text();
+    expect(html).toContain('50 px per square, 20 across × 16 down');
+
+    const created = await confirm(admin, stagedUuidFrom(html), { name: 'Staged Grid Second' });
+    expect(findMap(uuidFromRedirect(created))!).toMatchObject({
+      gridSize: 50,
+      gridWidth: 20,
+      gridHeight: 16,
+      gridSource: 'detected',
+    });
   });
 
   test('the matched map’s tags are offered, so a variant stays findable with its siblings', async () => {

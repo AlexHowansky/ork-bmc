@@ -6,7 +6,7 @@ import { config, loadConfig } from '../src/config.ts';
 import { fingerprintImage, hammingDistance } from '../src/images/fingerprint.ts';
 import { encodeAs, processUpload, rescaleStored, sniffFormat } from '../src/images/process.ts';
 import { fullImagePath, isValidUuid, shardFor, thumbImagePath } from '../src/images/storage.ts';
-import { ensureSchema, makeMapPng } from './helpers.ts';
+import { ensureSchema, makeMapPng, makePlainPng } from './helpers.ts';
 
 beforeAll(ensureSchema);
 
@@ -155,9 +155,32 @@ describe('processUpload', () => {
     expect(result.imageWidth).toBe(280);
   });
 
-  test('leaves the grid unrecorded when nothing was supplied', async () => {
-    const result = await processUpload(await makeMapPng(), { grid: {} });
+  test('leaves the grid unrecorded when nothing was supplied and nothing is painted', async () => {
+    const result = await processUpload(await makePlainPng(), { grid: {} });
     expect(result.grid).toMatchObject({ gridSize: null, source: 'none', upscaleFactor: 1 });
+  });
+
+  test('measures the painted grid when nothing was supplied', async () => {
+    const result = await processUpload(await makeMapPng(1000, 800, 50), { grid: {} });
+
+    expect(result.grid).toMatchObject({
+      gridSize: 50,
+      gridWidth: 20,
+      gridHeight: 16,
+      source: 'detected',
+      upscaleFactor: 1,
+    });
+    // A measurement that lands on a whole number of pixels asks for no
+    // enlargement, so the file is stored at the size it arrived at.
+    expect(result.imageWidth).toBe(1000);
+    expect(result.imageHeight).toBe(800);
+  });
+
+  test('does not measure the image when the grid was given', async () => {
+    // A 50px grid is painted, but 40 squares across 1000px is 25px, and what the
+    // admin says goes.
+    const result = await processUpload(await makeMapPng(1000, 800, 50), { grid: { gridWidth: 40 } });
+    expect(result.grid).toMatchObject({ gridSize: 25, gridWidth: 40, source: 'user' });
   });
 
   test('strips metadata, so an embedded payload cannot survive the round trip', async () => {
