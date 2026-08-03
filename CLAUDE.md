@@ -17,16 +17,23 @@ Prefer built-ins over dependencies: `bun:sqlite` (not better-sqlite3),
 
 ```bash
 bun run dev         # rebuild CSS, then serve with watching
-bun test            # full suite
+bun run test        # full suite — not a bare `bun test`, see below
 bun run typecheck   # tsc --noEmit — run before calling anything done
-bun run css:build   # required after adding Tailwind classes
-bun run db:migrate
+bun run build       # required after adding Tailwind classes
+bun run migrate
 ```
 
 ## Things that will bite you
 
+- **The suite runs with `--no-env-file`, so use `bun run test`.** A bare
+  `bun test` reads your `.env` and the run then depends on an untracked file —
+  which is how a machine with `WEB_SEARCH_PROVIDER` set fails a test that passes
+  in CI. Under the flag, config in tests is `config.ts` defaults plus whatever
+  `tests/setup.ts` assigns, and a test needing a non-default setting sets it
+  there. The flag does not block a variable exported in your shell; only the
+  preload can.
 - **Tailwind classes are compiled from source.** After adding a class in a
-  `.tsx` file, run `bun run css:build` or it simply will not apply. `styles/app.css`
+  `.tsx` file, run `bun run build` or it simply will not apply. `styles/app.css`
   lists the scanned paths; `public/app.js` is one of them, but classes the script
   toggles are better declared in `src/views/ui.ts` and passed to it in a data
   attribute, as the upload drop zone does.

@@ -41,7 +41,7 @@ jobs:
       # tests/setup.ts points config at a throwaway database and image
       # directory, so no .env is needed here.
       - name: Unit tests
-        run: bun test
+        run: bun run test
 
   audit:
     name: Security audit

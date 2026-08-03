@@ -1,0 +1,1 @@
+- When a new map is uploaded, search the web for a match that is higher resolution, and if found, prompt the user to use that one instead.

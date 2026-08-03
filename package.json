@@ -6,15 +6,13 @@
   "private": true,
   "license": "MIT",
   "scripts": {
-    "dev": "bun run css:build && bun --watch src/server.tsx",
-    "start": "bun run src/server.tsx",
-    "build": "bun run css:build",
-    "css:build": "bunx @tailwindcss/cli -i styles/app.css -o public/app.css --minify",
-    "css:watch": "bunx @tailwindcss/cli -i styles/app.css -o public/app.css --watch",
-    "db:migrate": "bun run src/db/migrate.ts",
-    "user": "bun run cli/user.ts",
-    "test": "bun test",
-    "typecheck": "bunx tsc --noEmit"
+    "build": "bunx @tailwindcss/cli -i styles/app.css -o public/app.css --minify",
+    "dev": "bun run build && bun run --watch src/server.tsx",
+    "migrate": "bun run src/db/migrate.ts",
+    "start": "bun run build && bun run src/server.tsx",
+    "test": "bun run build && bun test --no-env-file",
+    "typecheck": "bunx tsc --noEmit",
+    "user": "bun run cli/user.ts"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",

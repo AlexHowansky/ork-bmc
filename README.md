@@ -18,9 +18,9 @@ authenticated routes — the image directory is never exposed as static files.
 
 ```bash
 bun install
-cp .env.example .env        # optional; every setting has a default
-bun run css:build           # build the stylesheet
-bun run db:migrate          # create the database
+cp .env.example .env # optional; every setting has a default
+bun run build        # build the stylesheet
+bun run migrate      # create the database
 ```
 
 Create the first administrator — there is no self-registration, by design:
@@ -33,7 +33,7 @@ Then start the server:
 
 ```bash
 bun run dev     # rebuilds CSS, then runs with file watching
-bun run start   # production
+bun run start   # rebuilds CSS, then runs without file watching
 ```
 
 Visit <http://127.0.0.1:3000>.
@@ -49,18 +49,18 @@ Accounts are managed entirely from the command line. All arguments are supplied
 on the command line; nothing is interactive.
 
 ```bash
-bun run cli/user.ts create          --email a@b.c --password 'secret' --role admin|viewer
-bun run cli/user.ts delete          --email a@b.c
-bun run cli/user.ts list            [--json]
-bun run cli/user.ts change-role     --email a@b.c --role admin|viewer
-bun run cli/user.ts change-password --email a@b.c --password 'secret'
+bun run user create          --email a@b.c --password 'secret' --role admin|viewer
+bun run user delete          --email a@b.c
+bun run user list            [--json]
+bun run user change-role     --email a@b.c --role admin|viewer
+bun run user change-password --email a@b.c --password 'secret'
 ```
 
 A password given on the command line is visible to other users through `ps` and
 is written to your shell history. Where that matters, pipe it in instead:
 
 ```bash
-printf '%s' "$PASSWORD" | bun run cli/user.ts create --email a@b.c --password-stdin --role viewer
+printf '%s' "$PASSWORD" | bun run user create --email a@b.c --password-stdin --role viewer
 ```
 
 Changing a password or a role signs that account out everywhere.
@@ -248,9 +248,8 @@ rather than opening a public issue.
 ## Development
 
 ```bash
-bun test          # 327 tests
+bun run test      # run full test suite
 bun run typecheck # tsc --noEmit
-bun run css:watch # rebuild CSS on change
 ```
 
 ### Layout
