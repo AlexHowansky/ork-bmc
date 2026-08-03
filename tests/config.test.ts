@@ -59,6 +59,25 @@ describe('image storage settings', () => {
   });
 });
 
+describe('the import download timeout', () => {
+  test('defaults to something a real image can arrive within', () => {
+    expect(load({}).importTimeoutMs).toBe(15_000);
+  });
+
+  test('is its own setting, not the search provider timeout', () => {
+    const config = load({ IMPORT_TIMEOUT_MS: '30000' });
+
+    expect(config.importTimeoutMs).toBe(30_000);
+    expect(config.webSearch.timeoutMs).toBe(6000);
+  });
+
+  test('refuses a value outside its bounds', () => {
+    expect(() => load({ IMPORT_TIMEOUT_MS: '100' })).toThrow(/IMPORT_TIMEOUT_MS must be at least 500/);
+    expect(() => load({ IMPORT_TIMEOUT_MS: '600000' })).toThrow(/IMPORT_TIMEOUT_MS must be at most 120000/);
+    expect(() => load({ IMPORT_TIMEOUT_MS: 'soon' })).toThrow(/IMPORT_TIMEOUT_MS must be a number/);
+  });
+});
+
 describe('higher-resolution search settings', () => {
   const enabled = { WEB_SEARCH_PROVIDER: 'serpapi', SERPAPI_KEY: 'k', PUBLIC_BASE_URL: 'https://maps.example.com' };
 

@@ -89,6 +89,25 @@
       .replace(/^\s+|\s+$/g, '');
   }
 
+  // Mirrors `filenameFromUrl` in src/models/maps.ts: the path only, decoded, so
+  // a CDN's query string never turns into part of a map's name.
+  function filenameFromUrl(rawUrl) {
+    var pathname;
+    try {
+      pathname = new URL(rawUrl).pathname;
+    } catch (error) {
+      return '';
+    }
+
+    try {
+      pathname = decodeURIComponent(pathname);
+    } catch (error) {
+      // A stray `%`; the raw path still names it.
+    }
+
+    return (pathname.split('/').pop() || '').slice(0, 255);
+  }
+
   document.addEventListener('change', function (event) {
     var input = event.target;
     if (!input || !input.hasAttribute || !input.hasAttribute('data-name-from-file')) return;
@@ -100,6 +119,23 @@
     // does it: typing a name of your own is no reason to be denied the grid.
     fillName(input.form, file.name);
     fillGrid(input.form, file.name);
+  });
+
+  // The same for an address typed or pasted in. `input` rather than `change` so
+  // the name appears with the paste rather than when the field is left, which is
+  // where the file picker's own feedback arrives.
+  document.addEventListener('input', function (event) {
+    var input = event.target;
+    if (!input || !input.hasAttribute || !input.hasAttribute('data-name-from-url')) return;
+    if (!input.form) return;
+
+    // Half an address has no file name in it yet, and filling the fields with
+    // nothing would claim this script had had its say.
+    var filename = filenameFromUrl(input.value);
+    if (filename === '') return;
+
+    fillName(input.form, filename);
+    fillGrid(input.form, filename);
   });
 
   /**

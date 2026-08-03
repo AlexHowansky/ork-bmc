@@ -22,6 +22,8 @@ export interface MapFormValues {
   name: string;
   variant: string;
   tags: string;
+  /** The address an upload was pasted in as, on the create form only. */
+  imageUrl: string;
   gridSize: string;
   gridWidth: string;
   gridHeight: string;
@@ -146,6 +148,49 @@ const SearchWebField: FC = () =>
     </div>
   );
 
+/**
+ * The other way to give the form an image: an address to fetch one from.
+ *
+ * Deliberately below the drop zone rather than beside it. The file is the usual
+ * way in and stays where it has always been; this is the alternative, and the
+ * divider says so in one word rather than making the layout imply it.
+ *
+ * `type="url"` so a phone offers the right keyboard and the browser catches an
+ * address with no scheme before the round trip. `data-name-from-url` is what
+ * public/app.js watches, so the name and square counts fill in from the address
+ * as it is typed, exactly as they do when a file is picked.
+ */
+const ImageUrlField: FC<{ value: string; error?: string | undefined }> = ({ value, error }) => (
+  <div class="mt-4">
+    <div class="flex items-center gap-3" aria-hidden="true">
+      <span class="h-px flex-1 bg-stone-200 dark:bg-stone-700" />
+      <span class="text-xs font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">or</span>
+      <span class="h-px flex-1 bg-stone-200 dark:bg-stone-700" />
+    </div>
+
+    <label for="imageUrl" class={`mt-4 ${label}`}>
+      Image address
+    </label>
+    <input
+      id="imageUrl"
+      name="imageUrl"
+      type="url"
+      value={value}
+      inputmode="url"
+      placeholder="https://example.com/maps/forest-road-40x30.png"
+      data-name-from-url
+      aria-describedby="imageUrl-hint"
+      aria-invalid={error ? 'true' : undefined}
+      class={`mt-1 ${error ? inputInvalid : input}`}
+    />
+    <p id="imageUrl-hint" class={hint}>
+      A link straight to the image file, not to the page it appears on. It is downloaded and stored here like any
+      other upload.
+    </p>
+    {error && <p class={fieldError}>{error}</p>}
+  </div>
+);
+
 /** The grid the staged image was already processed against; not editable here. */
 const StagedGrid: FC<{ staged: StagedUpload }> = ({ staged }) =>
   staged.gridSize === null ? (
@@ -192,8 +237,12 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
         </div>
       ) : mode === 'create' ? (
         <div class="mt-4">
-          <label for="image" class={label}>
-            Map file <span class="text-red-600 dark:text-red-400">*</span>
+          {/* Neither field is required on its own and the form needs one of
+              them, which is a rule no single asterisk can state — so it is said
+              once, here, and both fields are left unmarked. */}
+          <p class="text-sm text-stone-600 dark:text-stone-400">Choose a file, or paste the address of one.</p>
+          <label for="image" class={`mt-4 ${label}`}>
+            Map file
           </label>
           {/* `data-dropzone` marks the drop target for public/app.js, which
               hands anything dropped here to the file input below so the
@@ -202,11 +251,14 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
           <div data-dropzone data-dropzone-active={dropZoneActive} class={`mt-1 ${dropZone}`}>
             {/* `data-name-from-file` is what public/app.js looks for, so it can
                 fill the name field in as soon as a file is chosen. */}
+            {/* Not `required`: the address below is the other way to fill this
+                form in, and a required file input would have the browser block a
+                submission carrying one. The server rejects a submission with
+                neither, which is what that attribute used to do. */}
             <input
               id="image"
               name="image"
               type="file"
-              required
               data-name-from-file
               accept="image/png,image/jpeg,image/webp"
               aria-describedby="image-hint"
@@ -221,6 +273,7 @@ export const MapForm: FC<MapFormProps> = ({ mode, action, csrfToken, values, err
             <p data-dropzone-message role="status" class={fieldError} />
           </div>
           {errors['image'] && <p class={fieldError}>{errors['image']}</p>}
+          <ImageUrlField value={values.imageUrl} error={errors['imageUrl']} />
           <SearchWebField />
         </div>
       ) : (

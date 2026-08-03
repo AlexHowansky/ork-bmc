@@ -261,6 +261,71 @@ describe('choosing a file', () => {
   });
 });
 
+describe('pasting an address', () => {
+  type Field = ReturnType<typeof makeField>;
+  let fields: Record<string, Field>;
+
+  /** Fires the address field's input event with what is now in it. */
+  function paste(url: string, typed: Partial<Record<string, string>> = {}): void {
+    fields = {
+      name: makeField(typed['name'] ?? ''),
+      gridSize: makeField(typed['gridSize'] ?? ''),
+      gridWidth: makeField(typed['gridWidth'] ?? ''),
+      gridHeight: makeField(typed['gridHeight'] ?? ''),
+    };
+
+    const form = {
+      querySelector: (selector: string) => {
+        const match = /input\[name="(\w+)"\]/.exec(selector);
+        return match ? (fields[match[1]!] ?? null) : null;
+      },
+    };
+
+    handlers['input']!({
+      target: {
+        hasAttribute: (name: string) => name === 'data-name-from-url',
+        form,
+        value: url,
+      },
+    });
+  }
+
+  test('names the map after the last part of the address', () => {
+    paste('https://maps.example.org/library/sunken_temple.png');
+    expect(fields['name']!.value).toBe('Sunken Temple');
+  });
+
+  test('takes square counts out of the address too', () => {
+    paste('https://maps.example.org/Forest%20Road%2040x30.png');
+
+    expect(fields['name']!.value).toBe('Forest Road');
+    expect(fields['gridWidth']!.value).toBe('40');
+    expect(fields['gridHeight']!.value).toBe('30');
+  });
+
+  test('ignores the query string, where a CDN keeps its own numbers', () => {
+    paste('https://cdn.example.org/marsh-crossing.png?w=1200&v=99x99');
+
+    expect(fields['name']!.value).toBe('Marsh Crossing');
+    expect(fields['gridWidth']!.value).toBe('');
+  });
+
+  test('says nothing while the address is still half typed', () => {
+    paste('https:/');
+
+    expect(fields['name']!.value).toBe('');
+    // Nothing was claimed, so a later paste is still free to fill it in.
+    expect(fields['name']!.getAttribute('data-autofilled')).toBeNull();
+  });
+
+  test('never clobbers a name the admin typed', () => {
+    paste('https://maps.example.org/Forest%20Road%2040x30.png', { name: 'Mine, thanks' });
+
+    expect(fields['name']!.value).toBe('Mine, thanks');
+    expect(fields['gridWidth']!.value).toBe('40');
+  });
+});
+
 describe('timestamps', () => {
   test('are restated in the reader’s own time zone, keeping UTC on the title', () => {
     const restated = timestamps[0]!;

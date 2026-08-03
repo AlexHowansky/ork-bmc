@@ -2,12 +2,20 @@
  * Fetching an image from an address this app did not choose.
  *
  * Every other outbound path in this app has no user input in it at all. This one
- * is handed a URL by a third-party search API and asked to download whatever is
- * there, which makes it the app's only server-side request forgery surface. The
- * rules below are what keep it from being a proxy into the network this process
- * happens to be sitting in:
+ * is handed a URL — by a third-party search API, or by an administrator pasting
+ * one into the upload form — and asked to download whatever is there, which makes
+ * it the app's only server-side request forgery surface. The rules below are what
+ * keep it from being a proxy into the network this process happens to be sitting
+ * in:
  *
- *   - https only, so a redirect cannot walk down to a plaintext or `file:` URL;
+ *   - the scheme is an allowlist, so `file:`, `data:` and the rest are refused
+ *     however a redirect chain arrives at them. It holds https only unless the
+ *     caller passes `allowInsecure`, which exists for the one caller whose URL
+ *     was typed by an administrator rather than supplied by a third party: a map
+ *     is still published over plaintext often enough that refusing would just
+ *     mean fetching it by hand. What that costs is tamper-evidence in transit,
+ *     which is not what stands between this and the local network — the address
+ *     check below is, and it does not care about the scheme;
  *   - the hostname is resolved first and every address it answers with must be
  *     publicly routable, which is what stops `internal.example.com` resolving to
  *     10.0.0.5 and stops the AWS metadata service at 169.254.169.254;
@@ -47,9 +55,18 @@ export interface FetchImageOptions {
   timeoutMs: number;
   /** How many redirects to follow. Each one is re-validated from scratch. */
   maxRedirects?: number;
+  /** Permit `http:` as well. Only for an address an administrator typed by hand. */
+  allowInsecure?: boolean;
+  /**
+   * How the messages below name what is being fetched. The default suits the
+   * search results this was written for; an import says "That image", because
+   * "that copy" means nothing when there is no original to be a copy of.
+   */
+  subject?: string;
 }
 
 const DEFAULT_MAX_REDIRECTS = 3;
+const DEFAULT_SUBJECT = 'That copy';
 
 const defaultLookup = (hostname: string): Promise<{ address: string }[]> => dnsLookup(hostname, { all: true });
 
@@ -108,33 +125,39 @@ function isPublicV6(address: string): boolean {
 }
 
 /** Rejects a URL this app must not dereference, and returns it parsed if it may. */
-async function assertFetchable(rawUrl: string, deps: FetchDeps): Promise<URL> {
+async function assertFetchable(rawUrl: string, options: FetchImageOptions, deps: FetchDeps): Promise<URL> {
+  const subject = options.subject ?? DEFAULT_SUBJECT;
+
   let url: URL;
   try {
     url = new URL(rawUrl);
   } catch {
-    throw badRequest('That copy is at an address that could not be understood.');
+    throw badRequest(`${subject} is at an address that could not be understood.`);
   }
 
-  if (url.protocol !== 'https:') {
-    throw badRequest('That copy is not served over a secure connection, so it was not downloaded.');
+  if (url.protocol !== 'https:' && !(options.allowInsecure && url.protocol === 'http:')) {
+    throw badRequest(
+      options.allowInsecure
+        ? `${subject} is at an address that is neither http nor https, so it was not downloaded.`
+        : `${subject} is not served over a secure connection, so it was not downloaded.`,
+    );
   }
 
   const host = url.hostname.replace(/^\[|\]$/g, '');
-  const addresses = isIP(host) ? [{ address: host }] : await resolve(host, deps);
+  const addresses = isIP(host) ? [{ address: host }] : await resolve(host, subject, deps);
 
   if (addresses.length === 0 || !addresses.every((entry) => isPubliclyRoutable(entry.address))) {
-    throw badRequest('That copy is hosted somewhere this server will not fetch from.');
+    throw badRequest(`${subject} is hosted somewhere this server will not fetch from.`);
   }
 
   return url;
 }
 
-async function resolve(hostname: string, deps: FetchDeps): Promise<{ address: string }[]> {
+async function resolve(hostname: string, subject: string, deps: FetchDeps): Promise<{ address: string }[]> {
   try {
     return await (deps.lookup ?? defaultLookup)(hostname);
   } catch {
-    throw badRequest('That copy is at an address that could not be found.');
+    throw badRequest(`${subject} is at an address that could not be found.`);
   }
 }
 
@@ -152,11 +175,12 @@ export async function fetchRemoteImage(
 ): Promise<Uint8Array> {
   const doFetch = deps.fetch ?? globalThis.fetch;
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+  const subject = options.subject ?? DEFAULT_SUBJECT;
   // One deadline for the whole exchange, redirects included, so a chain of slow
   // hops cannot add up to an unbounded wait.
   const signal = AbortSignal.timeout(options.timeoutMs);
 
-  let target = await assertFetchable(rawUrl, deps);
+  let target = await assertFetchable(rawUrl, options, deps);
 
   for (let hop = 0; ; hop += 1) {
     let response: Response;
@@ -165,28 +189,28 @@ export async function fetchRemoteImage(
     } catch (error) {
       throw badRequest(
         signal.aborted
-          ? 'That copy took too long to download.'
-          : 'That copy could not be downloaded from where it is hosted.',
+          ? `${subject} took too long to download.`
+          : `${subject} could not be downloaded from where it is hosted.`,
         { cause: error },
       );
     }
 
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('location');
-      if (!location) throw badRequest('That copy could not be downloaded from where it is hosted.');
-      if (hop >= maxRedirects) throw badRequest('That copy redirects too many times to follow.');
+      if (!location) throw badRequest(`${subject} could not be downloaded from where it is hosted.`);
+      if (hop >= maxRedirects) throw badRequest(`${subject} redirects too many times to follow.`);
 
       // Re-validated from scratch, not merely resolved: the whole point of
       // following redirects by hand is that a public host may point inward.
-      target = await assertFetchable(new URL(location, target).toString(), deps);
+      target = await assertFetchable(new URL(location, target).toString(), options, deps);
       continue;
     }
 
     if (!response.ok) {
-      throw badRequest(`That copy could not be downloaded (the site answered ${response.status}).`);
+      throw badRequest(`${subject} could not be downloaded (the site answered ${response.status}).`);
     }
 
-    return await readCapped(response, options.maxBytes);
+    return await readCapped(response, options.maxBytes, subject);
   }
 }
 
@@ -197,14 +221,14 @@ export async function fetchRemoteImage(
  * a response can under-declare, or omit the header entirely and stream forever.
  * The running total is what actually bounds the memory.
  */
-async function readCapped(response: Response, maxBytes: number): Promise<Uint8Array> {
+async function readCapped(response: Response, maxBytes: number, subject: string): Promise<Uint8Array> {
   const declared = Number(response.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) {
-    throw badRequest('That copy is larger than this server will download.');
+    throw badRequest(`${subject} is larger than this server will download.`);
   }
 
   const body = response.body;
-  if (!body) throw badRequest('That copy could not be downloaded from where it is hosted.');
+  if (!body) throw badRequest(`${subject} could not be downloaded from where it is hosted.`);
 
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -216,7 +240,7 @@ async function readCapped(response: Response, maxBytes: number): Promise<Uint8Ar
       if (done) break;
       total += value.length;
       if (total > maxBytes) {
-        throw badRequest('That copy is larger than this server will download.');
+        throw badRequest(`${subject} is larger than this server will download.`);
       }
       chunks.push(value);
     }

@@ -260,13 +260,10 @@ export function paintGridPlane(
 
 let mapSeq = 0;
 
-/** Builds the multipart body the upload form posts. */
-export function uploadForm(
-  token: string,
-  image: Buffer,
-  overrides: Partial<Record<'name' | 'variant' | 'tags' | 'gridSize' | 'gridWidth' | 'gridHeight', string>> = {},
-  filename = 'map.png',
-): FormData {
+type FormOverrides = Partial<Record<'name' | 'variant' | 'tags' | 'gridSize' | 'gridWidth' | 'gridHeight', string>>;
+
+/** The fields both ways of submitting the upload form have in common. */
+function baseForm(token: string, overrides: FormOverrides): FormData {
   const form = new FormData();
   form.set('_csrf', token);
   form.set('name', overrides.name ?? `Test Map ${++mapSeq}-${Date.now()}`);
@@ -275,7 +272,30 @@ export function uploadForm(
   form.set('gridSize', overrides.gridSize ?? '');
   form.set('gridWidth', overrides.gridWidth ?? '');
   form.set('gridHeight', overrides.gridHeight ?? '');
+  return form;
+}
+
+/** Builds the multipart body the upload form posts. */
+export function uploadForm(
+  token: string,
+  image: Buffer,
+  overrides: FormOverrides = {},
+  filename = 'map.png',
+): FormData {
+  const form = baseForm(token, overrides);
   form.set('image', new File([image as unknown as BlobPart], filename, { type: 'image/png' }));
+  return form;
+}
+
+/**
+ * The same form filled in the other way: an address instead of a file.
+ *
+ * Pass `{ name: '' }` to leave the name blank, which is how a test asks for the
+ * name to be derived from the address.
+ */
+export function importForm(token: string, imageUrl: string, overrides: FormOverrides = {}): FormData {
+  const form = baseForm(token, overrides);
+  form.set('imageUrl', imageUrl);
   return form;
 }
 

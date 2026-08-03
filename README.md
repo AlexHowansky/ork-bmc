@@ -74,7 +74,16 @@ Changing a password or a role signs that account out everywhere.
 
 ## Using the app
 
-**Uploading.** PNG, JPG, and WEBP are accepted. Every upload is re-encoded for
+**Uploading.** PNG, JPG, and WEBP are accepted. Choose a file, drag one onto the
+box, or paste the address of one — a link straight to the image file, not to the
+page it appears on. An imported image is downloaded and then treated exactly like
+a file you picked: the same size limit, the same name and grid read out of its
+file name, the same duplicate check. `IMPORT_TIMEOUT_MS` bounds how long the
+download may take. Plain `http` addresses are accepted as well as `https`, but
+the server will only fetch from a publicly routable address, so a link to
+something on your own network is refused.
+
+Every upload is re-encoded for
 storage and filed under a fresh UUID v4, with a thumbnail alongside it. What it
 is re-encoded to is up to the operator — `IMAGE_FORMAT`, `IMAGE_QUALITY` and
 `IMAGE_LOSSLESS`, defaulting to WEBP at quality 95. Set `IMAGE_LOSSLESS=true`
@@ -182,7 +191,8 @@ The settings most worth reviewing:
 |---|---|---|
 | `IMAGE_DIR` | `./data/images` | Where maps are stored. Must be outside `public/`. |
 | `DATABASE_PATH` | `./data/bmc.sqlite` | SQLite database file. |
-| `MAX_UPLOAD_BYTES` | `25MB` | Largest accepted upload. Accepts a `KB`/`MB`/`GB` suffix. |
+| `MAX_UPLOAD_BYTES` | `25MB` | Largest accepted upload, whether picked or imported. Accepts a `KB`/`MB`/`GB` suffix. |
+| `IMPORT_TIMEOUT_MS` | `15000` | How long an image pasted in as an address may take to download. |
 | `IMAGE_FORMAT` | `webp` | How maps are stored: `webp`, `png` or `jpeg`. New uploads only. |
 | `IMAGE_QUALITY` | `95` | 1–100. JPEG always; WEBP unless lossless; PNG only below 100, as palette quantisation. |
 | `IMAGE_LOSSLESS` | `false` | WEBP only, and the only way to store uploads bit-for-bit. Refused with `jpeg`. |

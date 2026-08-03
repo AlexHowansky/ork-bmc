@@ -19,6 +19,7 @@ import {
   createMap,
   deleteMap,
   findMap,
+  filenameFromUrl,
   findSimilarMaps,
   nameFromFilename,
   parseTagInput,
@@ -53,10 +54,18 @@ adminRoutes.use('/maps/:uuid/delete', requireAdmin());
 
 const MAX_VARIANT_LENGTH = 100;
 
+/**
+ * The longest address worth trying to parse. Real image URLs are nowhere near
+ * this, and it keeps a paste of something that is not a URL at all out of the
+ * fetch path.
+ */
+const MAX_URL_LENGTH = 2000;
+
 const emptyValues = (): MapFormValues => ({
   name: '',
   variant: '',
   tags: '',
+  imageUrl: '',
   gridSize: '',
   gridWidth: '',
   gridHeight: '',
@@ -66,6 +75,7 @@ const valuesFromMap = (map: MapRecord): MapFormValues => ({
   name: map.name,
   variant: map.variant,
   tags: map.tags.join(' '),
+  imageUrl: '',
   gridSize: map.gridSize?.toString() ?? '',
   gridWidth: map.gridWidth?.toString() ?? '',
   gridHeight: map.gridHeight?.toString() ?? '',
@@ -119,6 +129,7 @@ function formValues(body: Record<string, unknown>, fallbackName = ''): MapFormVa
     name: field(body, 'name') || fallbackName,
     variant: field(body, 'variant'),
     tags: field(body, 'tags'),
+    imageUrl: field(body, 'imageUrl'),
     gridSize: field(body, 'gridSize'),
     gridWidth: field(body, 'gridWidth'),
     gridHeight: field(body, 'gridHeight'),
@@ -256,7 +267,8 @@ adminRoutes.get('/maps/new', (c) =>
 /**
  * Handles the upload form, in either of the two states it can be submitted from.
  *
- * A first submission carries a file. It is always staged first, and then two
+ * A first submission carries a file, or an address to fetch one from. It is
+ * always staged first, and then two
  * questions are asked of it: does it look like a map already in the library, and
  * is there a better copy of it on the web. If neither turns anything up — the
  * overwhelmingly common case — the map is created straight away and this behaves
@@ -285,24 +297,36 @@ async function createFromUpload(c: Context<AppEnv>, body: Record<string, unknown
   let pending: PendingUpload | null = null;
 
   try {
-    // The file's name only, not its bytes: it is what an unnamed map is named
-    // after, and the checks below still own rejecting a file that is not usable.
-    const file = body['image'];
-    const uploadedName = file instanceof File ? file.name.slice(0, 255) : '';
+    // A file or an address, never both and never neither. Only the file's *name*
+    // is read here, not its bytes: it is what an unnamed map is named after, and
+    // the checks below still own rejecting a file that is not usable.
+    const submitted = body['image'];
+    const file = submitted instanceof File && submitted.size > 0 ? submitted : null;
+    const imageUrl = field(body, 'imageUrl');
 
-    const fallbackName = nameFromFilename(uploadedName);
+    // The name to derive a map name and a grid from, whichever way the image
+    // arrived. Everything downstream reads this rather than asking which it was.
+    const sourceName = file ? file.name.slice(0, 255) : filenameFromUrl(imageUrl);
+
+    const fallbackName = nameFromFilename(sourceName);
     // Before validating, so a rejected submission comes back intact.
     values = formValues(body, fallbackName);
     const { parsed } = parseMapForm(body, fallbackName);
 
-    if (!(file instanceof File) || file.size === 0) {
-      throw validationFailed({ image: 'Please choose an image file to upload.' });
+    if (file && imageUrl !== '') {
+      throw validationFailed({ imageUrl: 'Choose a file or paste an address, not both.' });
+    }
+    if (!file && imageUrl === '') {
+      throw validationFailed({ image: 'Please choose an image file to upload, or paste the address of one.' });
+    }
+    if (imageUrl.length > MAX_URL_LENGTH) {
+      throw validationFailed({ imageUrl: 'That address is too long to be a link to an image.' });
     }
 
     // Square counts written into the filename stand in for an untouched grid
     // section — "Forest Road 40x30.png" means 40 across and 30 down. Anything
     // the admin typed, including a grid size on its own, outranks them.
-    const fromFilename = gridFromFilename(uploadedName);
+    const fromFilename = gridFromFilename(sourceName);
     const untouchedGrid =
       parsed.gridSize === undefined && parsed.gridWidth === undefined && parsed.gridHeight === undefined;
     const namedGrid = untouchedGrid ? fromFilename : null;
@@ -312,9 +336,9 @@ async function createFromUpload(c: Context<AppEnv>, body: Record<string, unknown
     }
 
     const inputGrid = namedGrid ?? chooseGridInput(parsed);
-    const bytes = new Uint8Array(await file.arrayBuffer());
+    const bytes = file ? new Uint8Array(await file.arrayBuffer()) : await download(imageUrl);
     const processed = await processUpload(bytes, { grid: inputGrid });
-    const originalFilename = uploadedName || null;
+    const originalFilename = sourceName || null;
 
     // Staged before anything is asked about it. Both questions below can take a
     // while — one of them talks to a third party — and from here on the files on
@@ -375,6 +399,7 @@ async function createFromUpload(c: Context<AppEnv>, body: Record<string, unknown
       uuid: map.uuid,
       name: map.name,
       variant: map.variant,
+      ...(file ? {} : { importedFrom: imageUrl }),
       ...(namedGrid ? { gridFromFilename: `${namedGrid.gridWidth}x${namedGrid.gridHeight}` } : {}),
     });
     setFlash(c, {
@@ -406,6 +431,34 @@ async function createFromUpload(c: Context<AppEnv>, body: Record<string, unknown
 
 /** True unless the admin unticked the search box. An unticked box sends nothing. */
 const wantsWebSearch = (body: Record<string, unknown>): boolean => field(body, 'searchWeb') !== '';
+
+/**
+ * Fetches an upload the admin gave the address of rather than the bytes of.
+ *
+ * `fetchRemoteImage` is the app's only sanctioned way to dereference a URL it
+ * did not choose, and this is its second caller. `allowInsecure` is set because
+ * this address was typed by an administrator rather than handed over by a search
+ * provider — see the note at the top of that module for what that does and does
+ * not give up.
+ *
+ * Its refusals arrive as a plain `AppError`, which `renderFormError` would send
+ * to the error page for want of a field to attach it to. A dead link is not an
+ * emergency, so it is re-thrown as a rejection of the address field and the form
+ * comes back with everything typed still in it.
+ */
+async function download(imageUrl: string): Promise<Uint8Array> {
+  try {
+    return await fetchRemoteImage(imageUrl, {
+      maxBytes: config.maxUploadBytes,
+      timeoutMs: config.importTimeoutMs,
+      allowInsecure: true,
+      subject: 'That image',
+    });
+  } catch (error) {
+    if (!isAppError(error)) throw error;
+    throw validationFailed({ imageUrl: error.userMessage });
+  }
+}
 
 /**
  * Turns a staged upload into a map, keeping the row until the map exists.
@@ -646,6 +699,7 @@ const valuesFromPending = (pending: PendingUpload): MapFormValues => ({
   name: '',
   variant: '',
   tags: '',
+  imageUrl: '',
   ...gridValuesFromPending(pending),
 });
 

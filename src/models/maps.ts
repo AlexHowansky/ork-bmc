@@ -102,6 +102,37 @@ function withoutGridToken(stem: string): string {
 }
 
 /**
+ * The file name buried in a URL, so an imported map is named like an uploaded one.
+ *
+ * Only the path is looked at: a query string is where a CDN keeps its resizing
+ * parameters and its cache busters, and none of that is anybody's idea of a map
+ * name. Percent-escapes are decoded, so `forest%20road.png` reads as it was
+ * written. Returns `''` for an address with no file name at the end of it —
+ * which leaves the "please name the map" validation to speak, exactly as a file
+ * with no usable name does.
+ *
+ * `public/app.js` carries an ES5 copy so the name field fills in as the address
+ * is typed; this is the authority, and the two must agree.
+ */
+export function filenameFromUrl(rawUrl: string): string {
+  let pathname: string;
+  try {
+    pathname = new URL(rawUrl).pathname;
+  } catch {
+    return '';
+  }
+
+  let decoded = pathname;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    // A stray `%` is not worth refusing over; the raw path still names it.
+  }
+
+  return (decoded.split('/').pop() ?? '').slice(0, 255);
+}
+
+/**
  * Derives a map name from the name of the file that was uploaded.
  *
  * Used as the default when the upload form arrives without one, so an admin who

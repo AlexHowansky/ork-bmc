@@ -165,6 +165,61 @@ describe('fetching a candidate image', () => {
       }),
     ).rejects.toThrow(/answered 403/);
   });
+
+  test('names what it is fetching however the caller asks', async () => {
+    expect(
+      fetchRemoteImage('https://internal.example.test/map.png', { ...options, subject: 'That image' }, {
+        lookup: resolvesTo('10.0.0.7'),
+      }),
+    ).rejects.toThrow(/^That image is hosted somewhere/);
+  });
+});
+
+/**
+ * The relaxation the upload form's address field asks for, and everything it is
+ * deliberately not.
+ */
+describe('fetching from an address an administrator typed', () => {
+  const options = { maxBytes: 1024, timeoutMs: 1000, allowInsecure: true };
+
+  test('allows plaintext, which the search path still refuses', async () => {
+    const fetch = async () => okResponse('image-bytes');
+
+    const bytes = await fetchRemoteImage('http://example.test/map.png', options, {
+      lookup: resolvesTo('93.184.216.34'),
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    });
+
+    expect(new TextDecoder().decode(bytes)).toBe('image-bytes');
+  });
+
+  test('still refuses a scheme that is neither http nor https', async () => {
+    expect(fetchRemoteImage('file:///etc/passwd', options, { lookup: resolvesTo('93.184.216.34') })).rejects.toThrow(
+      /neither http nor https/,
+    );
+  });
+
+  test('still refuses a plaintext host inside the network', async () => {
+    // The scheme is what was relaxed; the address check is what does the work,
+    // and it does not care which one it was reached over.
+    expect(
+      fetchRemoteImage('http://internal.example.test/map.png', options, { lookup: resolvesTo('169.254.169.254') }),
+    ).rejects.toThrow(/will not fetch from/);
+  });
+
+  test('still re-checks a plaintext redirect', async () => {
+    const fetch = async () =>
+      new Response(null, { status: 302, headers: { location: 'http://inside.example.test/secret' } });
+    const lookup = async (hostname: string) =>
+      hostname === 'inside.example.test' ? [{ address: '10.0.0.7' }] : [{ address: '93.184.216.34' }];
+
+    expect(
+      fetchRemoteImage('http://example.test/start', options, {
+        lookup,
+        fetch: fetch as unknown as typeof globalThis.fetch,
+      }),
+    ).rejects.toThrow(/will not fetch from/);
+  });
 });
 
 describe('reading a provider answer', () => {

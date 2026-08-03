@@ -39,6 +39,13 @@ export interface Config {
   readonly imageDir: string;
 
   readonly maxUploadBytes: number;
+  /**
+   * How long an upload pasted in as an address may take to download, start to
+   * finish. Separate from the web search's own timeout: that one belongs to a
+   * feature that is off by default, and it covers a provider's answer rather
+   * than a whole image coming down someone's home connection.
+   */
+  readonly importTimeoutMs: number;
   readonly maxImagePixels: number;
   readonly thumbSize: number;
   readonly thumbQuality: number;
@@ -269,6 +276,7 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): C
     imageDir: read.path('IMAGE_DIR', './data/images'),
 
     maxUploadBytes: read.bytes('MAX_UPLOAD_BYTES', 25 * 1024 * 1024, { min: 1024, max: 1024 ** 3 }),
+    importTimeoutMs: read.number('IMPORT_TIMEOUT_MS', 15_000, { min: 500, max: 120_000, integer: true }),
     maxImagePixels: read.number('MAX_IMAGE_PIXELS', 100_000_000, { min: 1_000, integer: true }),
     thumbSize: read.number('THUMB_SIZE', 400, { min: 32, max: 2000, integer: true }),
     thumbQuality: read.number('THUMB_QUALITY', 90, { min: 1, max: 100, integer: true }),

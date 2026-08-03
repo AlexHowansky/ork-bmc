@@ -49,12 +49,19 @@ bun run migrate
 - **The CSP has no `unsafe-inline`.** No inline `<script>`, and no `style`
   attributes. The single dynamic style (the grid overlay) uses a per-request
   nonce; see `gridOverlayCss` in `views/Layout.tsx`.
-- **`public/app.js` duplicates two server functions on purpose.**
-  `nameFromFilename` (`src/models/maps.ts`) and `gridFromFilename`
-  (`src/images/grid.ts`) are the authorities: the upload route applies both to
-  the file it receives. `app.js` carries an ES5 copy of each so the name and the
-  square counts appear as soon as a file is picked. Change one, change the other,
-  or the field an admin sees stops matching what gets saved.
+- **`public/app.js` duplicates three server functions on purpose.**
+  `nameFromFilename` and `filenameFromUrl` (`src/models/maps.ts`) and
+  `gridFromFilename` (`src/images/grid.ts`) are the authorities: the upload route
+  applies them to the file — or the address — it receives. `app.js` carries an ES5
+  copy of each so the name and the square counts appear as soon as a file is
+  picked or an address is pasted. Change one, change the other, or the field an
+  admin sees stops matching what gets saved.
+- **The upload form takes a file *or* an address, never both.** `POST /maps/new`
+  reads `image` and `imageUrl` and rejects a submission carrying both or neither;
+  the file input is deliberately not `required`, because that attribute would
+  have the browser block a submission carrying only an address. From the point
+  the bytes are in hand the two are the same path — same limits, same staging,
+  same duplicate check — so nothing downstream needs to know which happened.
 - **A map's storage format lives on its row, not in the config.** `IMAGE_FORMAT`
   decides what a *new* upload is encoded as; `maps.format` records what each one
   actually is, and that is what names the file on disk and sets the
@@ -94,9 +101,15 @@ bun run migrate
   and a provider having a bad day is not the admin's problem. Anything added
   there keeps that property.
 - **`src/websearch/fetchImage.ts` is the only place that dereferences a URL the
-  app did not choose.** Candidate images go through it or not at all. Its DNS
-  resolver is injectable because resolution happens before `fetch`, so a stubbed
-  `globalThis.fetch` tests nothing about the guard.
+  app did not choose.** Candidate images and pasted addresses go through it or
+  not at all. Its DNS resolver is injectable because resolution happens before
+  `fetch`, so a stubbed `globalThis.fetch` tests nothing about the guard. It has
+  two callers with different needs, expressed as options that both default to the
+  stricter behaviour: `allowInsecure` permits `http:` and is passed *only* by the
+  upload route, whose address an administrator typed, never by the search path;
+  `subject` names the thing being fetched in its messages. The scheme allowlist
+  and the publicly-routable check are what stop it being a proxy into the local
+  network, and only the first of those is negotiable.
 - **`SERPAPI_KEY` normalises to `serpapikey` in the log redaction pass**, which
   strips `-` and `_`. That is why `src/log.ts` lists `serpapikey` and not just
   `apikey`. The SerpApi request URL carries the key in a query parameter, so
