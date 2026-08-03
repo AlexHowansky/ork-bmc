@@ -5,7 +5,7 @@
     "": {
       "name": "bmc",
       "dependencies": {
-        "hono": "^4.12.33",
+        "hono": "^4.12.34",
         "sharp": "^0.35.3",
       },
       "devDependencies": {
