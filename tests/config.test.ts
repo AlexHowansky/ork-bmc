@@ -58,3 +58,57 @@ describe('image storage settings', () => {
     }
   });
 });
+
+describe('higher-resolution search settings', () => {
+  const enabled = { WEB_SEARCH_PROVIDER: 'serpapi', SERPAPI_KEY: 'k', PUBLIC_BASE_URL: 'https://maps.example.com' };
+
+  test('are off by default, and need nothing else to be', () => {
+    expect(load({}).webSearch.provider).toBe('none');
+    expect(load({}).webSearch.apiKey).toBe('');
+    expect(load({}).webSearch.publicBaseUrl).toBe('');
+  });
+
+  test('accept a full configuration', () => {
+    expect(load(enabled).webSearch.provider).toBe('serpapi');
+  });
+
+  test('reject an unknown provider', () => {
+    expect(() => load({ ...enabled, WEB_SEARCH_PROVIDER: 'tineye' })).toThrow(/WEB_SEARCH_PROVIDER must be one of/);
+  });
+
+  test('refuse to start a provider with no key', () => {
+    expect(() => load({ ...enabled, SERPAPI_KEY: '' })).toThrow(/needs SERPAPI_KEY/);
+  });
+
+  test('refuse to start a provider with no address to fetch from', () => {
+    expect(() => load({ ...enabled, PUBLIC_BASE_URL: '' })).toThrow(/needs PUBLIC_BASE_URL/);
+  });
+
+  test('insist the address is one the internet could reach', () => {
+    // Each of these would fail on every single upload, silently, and the logs
+    // would be the only place that said so.
+    expect(() => load({ ...enabled, PUBLIC_BASE_URL: 'http://maps.example.com' })).toThrow(/must use https/);
+    expect(() => load({ ...enabled, PUBLIC_BASE_URL: 'https://localhost:3000' })).toThrow(/reachable from the internet/);
+    expect(() => load({ ...enabled, PUBLIC_BASE_URL: 'https://192.168.1.10' })).toThrow(/reachable from the internet/);
+    expect(() => load({ ...enabled, PUBLIC_BASE_URL: 'maps.example.com' })).toThrow(/must be an absolute URL/);
+    expect(() => load({ ...enabled, PUBLIC_BASE_URL: 'https://maps.example.com/bmc' })).toThrow(/bare origin/);
+  });
+
+  test('forgive a trailing slash rather than refusing over one', () => {
+    expect(load({ ...enabled, PUBLIC_BASE_URL: 'https://maps.example.com/' }).webSearch.publicBaseUrl).toBe(
+      'https://maps.example.com',
+    );
+  });
+
+  test('report a missing key and a bad address together', () => {
+    try {
+      load({ WEB_SEARCH_PROVIDER: 'serpapi', SERPAPI_KEY: '', PUBLIC_BASE_URL: 'http://localhost' });
+      throw new Error('expected loadConfig to throw');
+    } catch (error) {
+      const message = (error as Error).message;
+      expect(message).toContain('SERPAPI_KEY');
+      expect(message).toContain('https');
+      expect(message).toContain('reachable from the internet');
+    }
+  });
+});

@@ -49,6 +49,10 @@ const PUBLIC_PATHS = new Set([
   '/logout',
   '/theme', // the toggle is available on the sign-in page
   '/healthz',
+  // The one image route that answers without a session. It is not open: it
+  // serves a single staged upload, to whoever holds a short-lived token that
+  // only a search provider was ever given. See `/staged-image` in routes/files.
+  '/staged-image',
   '/app.css',
   '/app.js',
   '/favicon.svg',

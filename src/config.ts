@@ -20,6 +20,16 @@ export type LogLevel = (typeof LOG_LEVELS)[number];
 export const IMAGE_FORMATS = ['webp', 'png', 'jpeg'] as const;
 export type ImageFormat = (typeof IMAGE_FORMATS)[number];
 
+/**
+ * Where to look for a higher-resolution copy of an upload.
+ *
+ * `none` is the default and disables the feature outright: no key is needed, no
+ * image is ever exposed, and the upload path short-circuits before any network
+ * call. Adding a provider here means adding a module under `src/websearch/`.
+ */
+export const WEB_SEARCH_PROVIDERS = ['none', 'serpapi'] as const;
+export type WebSearchProvider = (typeof WEB_SEARCH_PROVIDERS)[number];
+
 export interface Config {
   readonly env: 'development' | 'production' | 'test';
   readonly host: string;
@@ -58,6 +68,34 @@ export interface Config {
 
   readonly fingerprint: {
     readonly maxDistance: number;
+  };
+
+  /**
+   * Looking for a better copy of an upload on the web.
+   *
+   * Off unless `provider` says otherwise, because it costs an API key, a network
+   * round trip on every upload, and a brief public URL for the staged image.
+   */
+  readonly webSearch: {
+    readonly provider: WebSearchProvider;
+    readonly apiKey: string;
+    /**
+     * The origin the search provider will fetch the staged image from. HOST and
+     * PORT describe the socket this process binds, which is the wrong answer
+     * behind a reverse proxy, so this has to be stated separately.
+     */
+    readonly publicBaseUrl: string;
+    readonly timeoutMs: number;
+    readonly maxCandidates: number;
+    /** How much bigger a copy must be to be worth offering, as a fraction. */
+    readonly minPixelGain: number;
+    readonly maxDownloadBytes: number;
+    /** Above this many pixels, an upload is good enough that searching is waste. */
+    readonly skipAbovePixels: number;
+    /** Searches allowed per rolling month, to stay inside a plan's quota. */
+    readonly monthlyLimit: number;
+    /** How long the staged image stays fetchable. Minutes, not hours. */
+    readonly shareTtlSeconds: number;
   };
 
   readonly pendingUploadTtlSeconds: number;
@@ -170,6 +208,55 @@ class EnvReader {
   }
 }
 
+/**
+ * Checks that a search provider would actually be able to reach us.
+ *
+ * The provider fetches the staged image itself, from the public internet, so
+ * this has to be an address the public internet can resolve and connect to over
+ * TLS. Every mistake below produces a provider that fails on every single
+ * upload, and none of them are visible without reading the logs — hence the
+ * refusal to start.
+ */
+function publicBaseUrlProblems(value: string, provider: WebSearchProvider): string[] {
+  if (value === '') {
+    return [`WEB_SEARCH_PROVIDER=${provider} needs PUBLIC_BASE_URL, the address it will fetch staged images from`];
+  }
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return [`PUBLIC_BASE_URL must be an absolute URL such as https://maps.example.com (got "${value}")`];
+  }
+
+  const problems: string[] = [];
+  if (url.protocol !== 'https:') {
+    problems.push(`PUBLIC_BASE_URL must use https (got "${url.protocol.replace(':', '')}")`);
+  }
+  if (url.pathname !== '/' || url.search !== '' || url.hash !== '') {
+    problems.push(`PUBLIC_BASE_URL must be a bare origin, with no path or query (got "${value}")`);
+  }
+  // Only literal addresses can be judged here; a hostname's resolution is not
+  // this process's to know. Catching the obvious ones is still worth it, because
+  // "it works on my machine" is exactly how this setting gets filled in.
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  const unreachable =
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host === '::1' ||
+    host === '0.0.0.0' ||
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+  if (unreachable) {
+    problems.push(`PUBLIC_BASE_URL must be reachable from the internet, and "${url.hostname}" is not`);
+  }
+
+  return problems;
+}
+
 export function loadConfig(env: Record<string, string | undefined> = Bun.env): Config {
   const read = new EnvReader(env);
 
@@ -208,6 +295,26 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): C
       maxDistance: read.number('FINGERPRINT_MAX_DISTANCE', 10, { min: 0, max: 64, integer: true }),
     },
 
+    webSearch: {
+      provider: read.enum('WEB_SEARCH_PROVIDER', WEB_SEARCH_PROVIDERS, 'none'),
+      apiKey: read.string('SERPAPI_KEY', ''),
+      // Trailing slashes are stripped rather than rejected: it is the single most
+      // likely way to write this, and every use appends a path.
+      publicBaseUrl: read.string('PUBLIC_BASE_URL', '').replace(/\/+$/, ''),
+      // Short by design. A provider that has not answered in this long has cost
+      // the admin more than a better copy of the map is worth.
+      timeoutMs: read.number('WEB_SEARCH_TIMEOUT_MS', 6000, { min: 500, max: 60_000, integer: true }),
+      maxCandidates: read.number('WEB_SEARCH_MAX_CANDIDATES', 5, { min: 1, max: 20, integer: true }),
+      minPixelGain: read.number('WEB_SEARCH_MIN_PIXEL_GAIN', 0.2, { min: 0, max: 100 }),
+      maxDownloadBytes: read.bytes('WEB_SEARCH_MAX_DOWNLOAD_BYTES', 25 * 1024 * 1024, {
+        min: 1024,
+        max: 1024 ** 3,
+      }),
+      skipAbovePixels: read.number('WEB_SEARCH_SKIP_ABOVE_PIXELS', 20_000_000, { min: 1000, integer: true }),
+      monthlyLimit: read.number('WEB_SEARCH_MONTHLY_LIMIT', 250, { min: 1, integer: true }),
+      shareTtlSeconds: read.number('WEB_SEARCH_SHARE_TTL_SECONDS', 300, { min: 30, max: 3600, integer: true }),
+    },
+
     // How long an upload held back for duplicate confirmation stays on disk
     // before the maintenance sweep reclaims it.
     pendingUploadTtlSeconds: read.number('PENDING_UPLOAD_TTL_SECONDS', 3600, { min: 60, integer: true }),
@@ -235,6 +342,15 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): C
   // asked for lossless ones.
   if (config.image.lossless && config.image.format === 'jpeg') {
     read.problems.push('IMAGE_LOSSLESS cannot be set with IMAGE_FORMAT=jpeg, because JPEG is always lossy');
+  }
+  // A search provider that cannot work is worse than none at all: it would spend
+  // a request on every upload and fail silently. Both of its prerequisites are
+  // checked here so the operator hears about it at boot rather than from a log.
+  if (config.webSearch.provider !== 'none') {
+    if (config.webSearch.apiKey === '') {
+      read.problems.push(`WEB_SEARCH_PROVIDER=${config.webSearch.provider} needs SERPAPI_KEY to be set`);
+    }
+    read.problems.push(...publicBaseUrlProblems(config.webSearch.publicBaseUrl, config.webSearch.provider));
   }
 
   if (read.problems.length > 0) {

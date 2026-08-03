@@ -31,6 +31,12 @@ const REDACTED_KEYS = new Set([
   'cookie',
   'authorization',
   'secret',
+  // The normalisation below strips `-` and `_`, so `SERPAPI_KEY` arrives here as
+  // `serpapikey` and `apikey` alone would not catch it. `key` is deliberately
+  // broad: nothing in this app logs a field called `key` that is worth reading.
+  'key',
+  'apikey',
+  'serpapikey',
 ]);
 
 function redact(fields: LogFields): LogFields {

@@ -24,7 +24,7 @@ import { migrate } from './db/migrate.ts';
 import { AppError, isAppError, payloadTooLarge } from './errors.ts';
 import { deleteImage, ensureImageDir } from './images/storage.ts';
 import { log } from './log.ts';
-import { expiredPendingUploads } from './models/pendingUploads.ts';
+import { expiredPendingUploads, expireShareTokens } from './models/pendingUploads.ts';
 import { adminRoutes } from './routes/admin.tsx';
 import { authRoutes } from './routes/auth.tsx';
 import { fileRoutes } from './routes/files.ts';
@@ -147,11 +147,18 @@ function startMaintenance(): void {
         await deleteImage(uuid);
       }
 
-      if (sessions > 0 || buckets > 0 || staged.length > 0) {
+      // Tidying rather than enforcement: a share token stops working the moment
+      // it expires, because the lookup checks the expiry itself. This clears the
+      // stored hashes left behind when a search never came back to revoke its
+      // own — a process that died mid-search, most likely.
+      const tokens = expireShareTokens();
+
+      if (sessions > 0 || buckets > 0 || staged.length > 0 || tokens > 0) {
         log.debug('maintenance sweep', {
           expiredSessions: sessions,
           staleRateLimitBuckets: buckets,
           abandonedUploads: staged.length,
+          expiredShareTokens: tokens,
         });
       }
     } catch (error) {
