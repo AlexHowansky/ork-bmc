@@ -68,7 +68,8 @@ const NavLink: FC<PropsWithChildren<{ href: string; active: boolean }>> = ({ hre
  * Cycles system → light → dark → system.
  *
  * A plain form POST, so it works with JavaScript disabled; /app.js upgrades
- * it to an instant in-page toggle. The button labels the theme it switches to.
+ * it to an instant in-page toggle. The button is icon-only: the hover title
+ * names the theme in effect, and the aria-label names that and the next one.
  */
 const ThemeToggle: FC<{ theme: Theme; currentPath: string; csrfToken: string }> = ({
   theme,
@@ -89,11 +90,10 @@ const ThemeToggle: FC<{ theme: Theme; currentPath: string; csrfToken: string }> 
       <button
         type="submit"
         class={button.ghost}
-        title={`Switch to ${labels[next].toLowerCase()}`}
+        title={labels[current]}
         aria-label={`Current: ${labels[current].toLowerCase()}. Switch to ${labels[next].toLowerCase()}.`}
       >
         <span aria-hidden="true">{current === 'dark' ? '🌙' : current === 'light' ? '☀️' : '🖥️'}</span>
-        <span class="hidden sm:inline">{labels[current]}</span>
       </button>
     </form>
   );

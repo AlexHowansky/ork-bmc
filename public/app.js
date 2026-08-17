@@ -397,22 +397,20 @@
     persist(next);
     apply(next);
 
-    // Keep the button's label, icon and next-value in step with the new state.
+    // Keep the button's hover text, icon and next-value in step with the new state.
     var following = ORDER[(ORDER.indexOf(next) + 1) % ORDER.length];
     var hidden = form.querySelector('input[name="theme"]');
     if (hidden) hidden.value = following;
 
     var button = form.querySelector('button');
     if (button) {
-      button.title = 'Switch to ' + LABELS[following].toLowerCase();
+      button.title = LABELS[next];
       button.setAttribute(
         'aria-label',
         'Current: ' + LABELS[next].toLowerCase() + '. Switch to ' + LABELS[following].toLowerCase() + '.',
       );
       var icon = button.querySelector('span[aria-hidden="true"]');
       if (icon) icon.textContent = ICONS[next];
-      var text = button.querySelector('span:not([aria-hidden])');
-      if (text) text.textContent = LABELS[next];
     }
   });
 
