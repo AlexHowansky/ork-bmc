@@ -78,6 +78,27 @@ describe('the import download timeout', () => {
   });
 });
 
+describe('the grid overlay colour', () => {
+  test('defaults to translucent red', () => {
+    expect(load({}).grid.overlayColor).toBe('rgba(220,38,38,0.6)');
+  });
+
+  test('accepts the three forms a colour can be written in', () => {
+    expect(load({ GRID_OVERLAY_COLOR: 'cyan' }).grid.overlayColor).toBe('cyan');
+    expect(load({ GRID_OVERLAY_COLOR: '#0ff' }).grid.overlayColor).toBe('#0ff');
+    expect(load({ GRID_OVERLAY_COLOR: '#00ffff80' }).grid.overlayColor).toBe('#00ffff80');
+    expect(load({ GRID_OVERLAY_COLOR: 'hsl(180 100% 50% / 60%)' }).grid.overlayColor).toBe('hsl(180 100% 50% / 60%)');
+  });
+
+  // It is interpolated into the page's one dynamic style block, so a value that
+  // could close the declaration must never reach it.
+  test('refuses anything that is not a colour', () => {
+    expect(() => load({ GRID_OVERLAY_COLOR: 'red;}body{display:none' })).toThrow(/GRID_OVERLAY_COLOR must be a CSS/);
+    expect(() => load({ GRID_OVERLAY_COLOR: 'url(https://example.com/x.png)' })).toThrow(/GRID_OVERLAY_COLOR/);
+    expect(() => load({ GRID_OVERLAY_COLOR: '#12' })).toThrow(/GRID_OVERLAY_COLOR/);
+  });
+});
+
 describe('higher-resolution search settings', () => {
   const enabled = { WEB_SEARCH_PROVIDER: 'serpapi', SERPAPI_KEY: 'k', PUBLIC_BASE_URL: 'https://maps.example.com' };
 

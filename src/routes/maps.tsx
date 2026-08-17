@@ -318,7 +318,7 @@ mapRoutes.get('/maps/:uuid', (c) => {
             {hasGrid && (
               <div
                 aria-hidden="true"
-                class="map-grid-overlay grid-overlay pointer-events-none absolute inset-0 hidden [--grid-overlay-color:rgba(220,38,38,0.6)]"
+                class="map-grid-overlay grid-overlay pointer-events-none absolute inset-0 hidden"
               />
             )}
 

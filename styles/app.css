@@ -76,10 +76,12 @@
    * `background-size` is deliberately absent: it is supplied per map by the
    * nonce'd <style> block the detail page emits (see `gridOverlayCss` in
    * views/Layout.tsx), in percentages so the overlay stays aligned at whatever
-   * width the image is actually displayed.
+   * width the image is actually displayed. That same block sets the colour from
+   * GRID_OVERLAY_COLOR; the fallback below is the config default, so the rules
+   * still draw if the variable never arrives.
    */
-  background-image: linear-gradient(to right, var(--grid-overlay-color) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--grid-overlay-color) 1px, transparent 1px);
+  background-image: linear-gradient(to right, var(--grid-overlay-color, rgba(220, 38, 38, 0.6)) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-overlay-color, rgba(220, 38, 38, 0.6)) 1px, transparent 1px);
   background-position: 0 0;
   background-repeat: repeat;
 }

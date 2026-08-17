@@ -6,6 +6,7 @@ import { CSRF_FIELD } from '../security/csrf.ts';
 import type { Theme } from '../types.ts';
 import type { Role } from '../models/users.ts';
 import { assetUrl } from '../assets.ts';
+import { config } from '../config.ts';
 import { button } from './ui.ts';
 
 export interface Flash {
@@ -41,12 +42,18 @@ export const CsrfInput: FC<{ token: string }> = ({ token }) => (
  * Sizing the overlay in percentages rather than pixels means it lines up at
  * whatever width the image is actually displayed, on a phone or a desktop.
  * Both inputs are clamped to positive integers, so the result is always a
- * fixed-shape rule with no room for injected CSS.
+ * fixed-shape rule with no room for injected CSS. The colour rides along here
+ * rather than as a utility class on the element, because it comes from
+ * `GRID_OVERLAY_COLOR` and Tailwind can only compile classes it can see; it is
+ * checked against a colour grammar at boot (`cssColor` in `config.ts`).
  */
 function gridOverlayCss({ columns, rows }: { columns: number; rows: number }): string {
   const safeColumns = Math.min(Math.max(Math.round(columns), 1), 10_000);
   const safeRows = Math.min(Math.max(Math.round(rows), 1), 10_000);
-  return `.map-grid-overlay{background-size:${(100 / safeColumns).toFixed(4)}% ${(100 / safeRows).toFixed(4)}%}`;
+  return (
+    `.map-grid-overlay{background-size:${(100 / safeColumns).toFixed(4)}% ${(100 / safeRows).toFixed(4)}%;` +
+    `--grid-overlay-color:${config.grid.overlayColor}}`
+  );
 }
 
 const NavLink: FC<PropsWithChildren<{ href: string; active: boolean }>> = ({ href, active, children }) => (

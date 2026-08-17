@@ -71,6 +71,12 @@ export interface Config {
     readonly minPx: number;
     readonly maxPx: number;
     readonly analysisMaxDim: number;
+    /**
+     * Colour of the map detail page's "Show grid overlay" rules. A CSS colour,
+     * validated at boot because it is interpolated into the nonce'd style block
+     * the page emits.
+     */
+    readonly overlayColor: string;
   };
 
   readonly fingerprint: {
@@ -208,6 +214,30 @@ class EnvReader {
     return normalised as ImageFormat;
   }
 
+  /**
+   * A CSS colour, restricted to the three forms that cannot carry anything else.
+   *
+   * The value ends up inside the map detail page's nonce'd style block, so the
+   * grammar is the security boundary rather than an escaping pass later: a named
+   * colour, a hex triplet/quad, or an `rgb`/`hsl` function whose arguments are
+   * numbers and separators. Nothing here can close a declaration or open a
+   * `url()`, and a typo is refused at boot instead of silently drawing nothing.
+   */
+  cssColor(key: string, fallback: string): string {
+    const value = this.raw(key);
+    if (value === undefined) return fallback;
+    const named = /^[a-z]+$/i;
+    const hex = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+    const functional = /^(?:rgba?|hsla?)\(\s*[0-9a-z.,%\s/+-]+\)$/i;
+    if (!named.test(value) && !hex.test(value) && !functional.test(value)) {
+      this.problems.push(
+        `${key} must be a CSS colour — a name, a #hex value, or an rgb()/rgba()/hsl()/hsla() function (got "${value}")`,
+      );
+      return fallback;
+    }
+    return value;
+  }
+
   /** Resolves to an absolute path so behaviour never depends on the working directory. */
   path(key: string, fallback: string): string {
     const value = this.raw(key) ?? fallback;
@@ -294,6 +324,7 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): C
       minPx: read.number('GRID_MIN_PX', 16, { min: 2, integer: true }),
       maxPx: read.number('GRID_MAX_PX', 512, { min: 4, integer: true }),
       analysisMaxDim: read.number('GRID_ANALYSIS_MAX_DIM', 2400, { min: 256, integer: true }),
+      overlayColor: read.cssColor('GRID_OVERLAY_COLOR', 'rgba(220,38,38,0.6)'),
     },
 
     fingerprint: {

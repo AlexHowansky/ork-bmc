@@ -106,7 +106,9 @@ If a map has a painted grid, record the pixels per square
 (*grid size*) and how many squares fit across and down. Fill in any one of the
 three and the others are worked out for you — enter a grid size of 70 on a
 1400×980 map and it records 20×14 squares. On the map's page, *Show grid
-overlay* draws the recorded grid over the image so you can check it lines up.
+overlay* draws the recorded grid over the image so you can check it lines up, in
+whatever colour `GRID_OVERLAY_COLOR` names — translucent red by default, which a
+map painted in reds is a good reason to change.
 
 Square counts rarely divide an image evenly: 30 squares across a 1000px map
 works out at 33.33px each, which no file can represent. Rather than round it and
