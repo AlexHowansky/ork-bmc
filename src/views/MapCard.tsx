@@ -2,7 +2,15 @@
 import type { FC } from 'hono/jsx';
 
 import type { MapRecord } from '../models/maps.ts';
-import { badge, tagPill } from './ui.ts';
+import { badge, tagPill, thumbWarning } from './ui.ts';
+
+/**
+ * A grid is only usable when all three numbers are present, so that is what
+ * both the caption and the warning marker key off — one test, so the marker
+ * cannot appear on a card that is also printing square counts.
+ */
+const hasGrid = (map: MapRecord): boolean =>
+  map.gridSize !== null && map.gridWidth !== null && map.gridHeight !== null;
 
 export const MapCard: FC<{ map: MapRecord }> = ({ map }) => (
   <a
@@ -10,7 +18,7 @@ export const MapCard: FC<{ map: MapRecord }> = ({ map }) => (
     class="group block overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600 dark:border-stone-800 dark:bg-stone-900"
   >
     {/* A fixed aspect ratio keeps the grid from reflowing as thumbnails load. */}
-    <div class="aspect-4/3 overflow-hidden bg-stone-100 dark:bg-stone-800">
+    <div class="relative aspect-4/3 overflow-hidden bg-stone-100 dark:bg-stone-800">
       <img
         src={`/i/${map.uuid}/thumb`}
         alt={`Thumbnail of ${map.name}`}
@@ -18,6 +26,21 @@ export const MapCard: FC<{ map: MapRecord }> = ({ map }) => (
         decoding="async"
         class="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
       />
+      {!hasGrid(map) && (
+        // The colour and the shape carry the meaning for anyone who can see
+        // them; the text carries it for everyone else.
+        <span class={thumbWarning} title="Grid size unknown">
+          <svg
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+            class="size-4"
+          >
+            <path d="M12 2.5a1.6 1.6 0 0 1 1.39.8l8.4 14.6A1.6 1.6 0 0 1 20.4 20.3H3.6a1.6 1.6 0 0 1-1.39-2.4l8.4-14.6A1.6 1.6 0 0 1 12 2.5Zm-1 5.6v5.2h2V8.1h-2Zm0 6.8v2h2v-2h-2Z" />
+          </svg>
+          <span class="sr-only">Grid size unknown</span>
+        </span>
+      )}
     </div>
 
     <div class="p-3">
@@ -30,7 +53,7 @@ export const MapCard: FC<{ map: MapRecord }> = ({ map }) => (
 
       <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">
         {map.imageWidth} × {map.imageHeight}
-        {map.gridSize !== null && map.gridWidth !== null && map.gridHeight !== null && (
+        {hasGrid(map) && (
           <> · {map.gridWidth}×{map.gridHeight} squares @ {map.gridSize}px</>
         )}
       </p>

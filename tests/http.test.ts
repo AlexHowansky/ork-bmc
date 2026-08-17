@@ -1191,6 +1191,63 @@ describe('pagination', () => {
   });
 });
 
+describe('the unknown-grid marker', () => {
+  const TAG = 'gridmarkerfixture';
+
+  const insert = (name: string, grid: { size: number; width: number; height: number } | null) =>
+    createMap({
+      uuid: crypto.randomUUID(),
+      name,
+      variant: '',
+      format: 'webp',
+      tags: [TAG],
+      gridSize: grid?.size ?? null,
+      gridWidth: grid?.width ?? null,
+      gridHeight: grid?.height ?? null,
+      gridSource: grid ? 'user' : 'none',
+      upscaleFactor: 1,
+      imageWidth: 280,
+      imageHeight: 210,
+      fileSize: 1,
+      fingerprint: null,
+      originalFilename: null,
+      uploadedBy: null,
+    });
+
+  beforeAll(() => {
+    insert('Grid Marker Known', { size: 70, width: 4, height: 3 });
+    insert('Grid Marker Unknown', null);
+    // A partial grid is not a usable one, so it has to be marked as well.
+    createMap({
+      uuid: crypto.randomUUID(),
+      name: 'Grid Marker Partial',
+      variant: '',
+      format: 'webp',
+      tags: [TAG],
+      gridSize: 70,
+      gridWidth: null,
+      gridHeight: null,
+      gridSource: 'estimated',
+      upscaleFactor: 1,
+      imageWidth: 280,
+      imageHeight: 210,
+      fileSize: 1,
+      fingerprint: null,
+      originalFilename: null,
+      uploadedBy: null,
+    });
+  });
+
+  test('marks only the cards whose maps have no usable grid', async () => {
+    const html = await (await admin.get(`/maps?tags=${TAG}`)).text();
+
+    expect((html.match(/alt="Thumbnail of/g) ?? []).length).toBe(3);
+    expect((html.match(/Grid size unknown<\/span>/g) ?? []).length).toBe(2);
+    // The card that does have a grid prints its square counts instead.
+    expect(html).toContain('4×3 squares @ 70px');
+  });
+});
+
 describe('theme', () => {
   test('defaults to following the system, with no class pinned', async () => {
     const html = await (await (new Client()).get('/login')).text();

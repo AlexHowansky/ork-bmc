@@ -75,6 +75,16 @@ export const badgeWarning =
   'inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800 ' +
   'dark:bg-amber-950 dark:text-amber-300';
 
+/**
+ * The marker a thumbnail carries when its map has no known grid.
+ *
+ * It sits over the image, so it needs a background of its own to stay readable
+ * against whatever the map happens to look like under it.
+ */
+export const thumbWarning =
+  'absolute right-2 top-2 inline-flex items-center rounded-full bg-amber-100 p-1 text-amber-700 ' +
+  'shadow-sm ring-1 ring-inset ring-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:ring-amber-800';
+
 export const tagPill =
   'inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ' +
   'ring-1 ring-inset ring-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:ring-amber-900';
