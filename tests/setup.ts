@@ -22,6 +22,9 @@ process.env['LOG_LEVEL'] = 'error';
 process.env['MAX_UPLOAD_BYTES'] = '8MB';
 process.env['MIN_PASSWORD_LENGTH'] = '12';
 process.env['PAGE_SIZE'] = '24';
+// The default, pinned so a provider set in `.env` or the shell cannot reach the
+// suite; tests that want a search build their own config.
+process.env['WEB_SEARCH_PROVIDER'] = 'none';
 
 export const TEST_ROOT = root;
 

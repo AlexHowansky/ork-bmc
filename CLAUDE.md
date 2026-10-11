@@ -26,12 +26,13 @@ bun run migrate
 ## Things that will bite you
 
 - **The suite runs with `--no-env-file`, so use `bun run test`.** A bare
-  `bun test` reads your `.env` and the run then depends on an untracked file —
-  which is how a machine with `WEB_SEARCH_PROVIDER` set fails a test that passes
-  in CI. Under the flag, config in tests is `config.ts` defaults plus whatever
+  `bun test` reads your `.env` and the run then depends on an untracked file.
+  Under the flag, config in tests is `config.ts` defaults plus whatever
   `tests/setup.ts` assigns, and a test needing a non-default setting sets it
   there. The flag does not block a variable exported in your shell; only the
-  preload can.
+  preload can — which is why it pins `WEB_SEARCH_PROVIDER` to `none`, a setting
+  that once failed a test on any machine whose `.env` named a provider. A new
+  setting that changes what a default-config test sees deserves the same pin.
 - **Tailwind classes are compiled from source.** After adding a class in a
   `.tsx` file, run `bun run build` or it simply will not apply. `styles/app.css`
   lists the scanned paths; `public/app.js` is one of them, but classes the script
