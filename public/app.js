@@ -40,8 +40,8 @@
 
   function apply(theme) {
     var root = document.documentElement;
-    root.classList.remove('light', 'dark');
-    if (theme !== 'system') root.classList.add(theme);
+    if (theme === 'system') root.removeAttribute('data-theme');
+    else root.setAttribute('data-theme', theme);
   }
 
   // Mirrors `gridFromFilename` in src/images/grid.ts — including the bounds,

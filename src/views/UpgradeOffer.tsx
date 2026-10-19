@@ -2,7 +2,7 @@
 import type { FC } from 'hono/jsx';
 
 import type { UploadCandidate } from '../models/uploadCandidates.ts';
-import { badge, badgeWarning, button, card, hint, link } from './ui.ts';
+import { badge, badgeWarning, button, card, hint, link, warningPanel } from './ui.ts';
 import { FORM_ID, type StagedUpload } from './MapForm.tsx';
 
 /**
@@ -20,7 +20,7 @@ function scaleLabel(candidate: UploadCandidate, staged: StagedUpload): string {
 }
 
 const Candidate: FC<{ candidate: UploadCandidate; staged: StagedUpload }> = ({ candidate, staged }) => (
-  <li class="flex items-center gap-4 py-3">
+  <li class="list-row items-center">
     {candidate.thumb ? (
       <img
         src={`/i/pending/${staged.uuid}/candidate/${candidate.id}`}
@@ -29,24 +29,24 @@ const Candidate: FC<{ candidate: UploadCandidate; staged: StagedUpload }> = ({ c
         decoding="async"
         width="72"
         height="72"
-        class="h-18 w-18 shrink-0 rounded-lg border border-stone-200 object-cover dark:border-stone-700"
+        class="size-18 rounded-field border border-base-300 object-cover"
       />
     ) : (
       // A candidate whose preview would not download is still worth offering;
       // the source link is there to be looked at instead.
-      <div class="flex h-18 w-18 shrink-0 items-center justify-center rounded-lg border border-dashed border-stone-300 text-xs text-stone-400 dark:border-stone-700 dark:text-stone-500">
+      <div class="flex size-18 items-center justify-center rounded-field border border-dashed border-base-300 text-xs text-base-content/50">
         No preview
       </div>
     )}
 
-    <div class="min-w-0 flex-1">
+    <div class="min-w-0">
       <div class="flex flex-wrap items-center gap-2">
         <span class={badge}>
           {candidate.width} × {candidate.height}
         </span>
-        <span class="text-xs font-medium text-amber-800 dark:text-amber-300">{scaleLabel(candidate, staged)}</span>
+        <span class="text-xs font-medium">{scaleLabel(candidate, staged)}</span>
       </div>
-      <p class="mt-1 truncate text-xs text-stone-500 dark:text-stone-400">
+      <p class="mt-1 truncate text-xs text-base-content/60">
         {candidate.pageUrl ? (
           // A new tab, so looking at where a copy came from does not throw away
           // the staged upload and everything typed about it.
@@ -85,35 +85,32 @@ export const UpgradeOffer: FC<{ candidates: UploadCandidate[]; staged: StagedUpl
   candidates,
   staged,
 }) => (
-  <div
-    role="alert"
-    class="rounded-xl border border-amber-300 bg-amber-50 p-6 dark:border-amber-900 dark:bg-amber-950/40"
-  >
-    <div class="flex flex-wrap items-center gap-3">
-      <span class={badgeWarning}>Higher resolution available</span>
-      <h2 class="text-lg font-semibold text-amber-900 dark:text-amber-200">
-        {candidates.length === 1
-          ? 'A larger copy of this map is published elsewhere'
-          : `${candidates.length} larger copies of this map are published elsewhere`}
-      </h2>
-    </div>
+  <div role="alert" class={warningPanel}>
+    <div class="card-body">
+      <div class="flex flex-wrap items-center gap-3">
+        <span class={badgeWarning}>Higher resolution available</span>
+        <h2 class="card-title">
+          {candidates.length === 1
+            ? 'A larger copy of this map is published elsewhere'
+            : `${candidates.length} larger copies of this map are published elsewhere`}
+        </h2>
+      </div>
 
-    <p class="mt-3 text-sm text-amber-900 dark:text-amber-200">
-      What you uploaded is {staged.imageWidth} × {staged.imageHeight}. Choosing one of these downloads it, checks it
-      really is the same map, and keeps it in place of your file — everything you have typed stays as it is, and
-      nothing joins the library until you save.
-    </p>
+      <p>
+        What you uploaded is {staged.imageWidth} × {staged.imageHeight}. Choosing one of these downloads it, checks it
+        really is the same map, and keeps it in place of your file — everything you have typed stays as it is, and
+        nothing joins the library until you save.
+      </p>
 
-    <div class={`mt-5 px-4 ${card}`}>
-      <ul class="divide-y divide-stone-100 dark:divide-stone-800">
+      <ul class={`list mt-2 ${card}`}>
         {candidates.map((candidate) => (
           <Candidate candidate={candidate} staged={staged} />
         ))}
       </ul>
-    </div>
 
-    <p class={hint}>
-      Sizes are as reported by the search; each one is confirmed against the actual file before it replaces yours.
-    </p>
+      <p class={hint}>
+        Sizes are as reported by the search; each one is confirmed against the actual file before it replaces yours.
+      </p>
+    </div>
   </div>
 );

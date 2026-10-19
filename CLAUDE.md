@@ -38,6 +38,16 @@ bun run migrate
   lists the scanned paths; `public/app.js` is one of them, but classes the script
   toggles are better declared in `src/views/ui.ts` and passed to it in a data
   attribute, as the upload drop zone does.
+- **UI is daisyUI, coloured by theme.** Use daisyUI components and its
+  semantic colours (`base-*`, `primary`, `error`…), not Tailwind palette
+  colours with `dark:` pairs — the dark theme recolours them, and Tailwind's
+  stock `dark:` follows only the OS, ignoring a theme the user has pinned. The
+  theme is `data-theme` on `<html>`, absent for "follow the system";
+  `public/app.js` sets the same attribute when it toggles. `styles/app.css` is only the Tailwind import and
+  the plugin — reach for a daisyUI class or a utility before adding CSS there.
+  The full-size map view is a checkbox `modal-toggle`, which must sit
+  *immediately* before its `.modal`: daisyUI opens it, and freezes the page
+  behind it, through `.modal-toggle:checked + .modal`.
 - **Route order matters.** `adminRoutes` is mounted before `mapRoutes` in
   `server.tsx` because `/maps/new` would otherwise be swallowed by
   `/maps/:uuid`. Adding another literal `/maps/<word>` route needs the same care.

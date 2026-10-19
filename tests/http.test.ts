@@ -23,7 +23,7 @@ import {
 } from './helpers.ts';
 
 /** The escaped form a Tailwind class name takes inside a CSS selector. */
-const escapeClassName = (name: string): string => name.replace(/[:/.[\]%]/g, (char) => `\\${char}`);
+const escapeClassName = (name: string): string => name.replace(/[:/.[\]%!]/g, (char) => `\\${char}`);
 
 let admin: Client;
 let viewer: Client;
@@ -731,10 +731,11 @@ describe('map detail', () => {
   test('the map opens full size on click, with no script involved', async () => {
     const html = await (await admin.get(`/maps/${mapUuid}`)).text();
 
-    // A checkbox and two labels for it: one around the image to open the view,
-    // one covering the screen to close it again.
-    expect(html).toContain('id="full-size"');
-    expect(html.match(/for="full-size"/g)).toHaveLength(2);
+    // A daisyUI modal held open by a checkbox, and three labels for it: one
+    // around the image to open the view, and the box and the backdrop to close
+    // it again.
+    expect(html).toContain('id="full-size" class="modal-toggle"');
+    expect(html.match(/for="full-size"/g)).toHaveLength(3);
     // Which is what makes it full size rather than a second fitted copy.
     expect(html).toContain('max-w-none');
 
@@ -756,8 +757,10 @@ describe('map detail', () => {
   });
 
   test('the page freeze behind the full-size view survives the CSS build', async () => {
+    // daisyUI's own scroll lock, which only works while the toggle sits
+    // directly before the modal.
     const css = await Bun.file('public/app.css').text();
-    expect(css).toContain('body:has([data-lightbox-toggle]:checked)');
+    expect(css).toContain(':root:has(.modal-toggle:checked+.modal)');
   });
 });
 
@@ -1249,7 +1252,7 @@ describe('the unknown-grid marker', () => {
 });
 
 describe('theme', () => {
-  test('defaults to following the system, with no class pinned', async () => {
+  test('defaults to following the system, with no theme pinned', async () => {
     const html = await (await (new Client()).get('/login')).text();
     expect(html).toContain('<html lang="en">');
   });
@@ -1259,6 +1262,6 @@ describe('theme', () => {
     await client.get('/login');
     await client.post('/theme', new URLSearchParams({ _csrf: await client.csrfToken('/login'), theme: 'dark' }));
 
-    expect(await (await client.get('/login')).text()).toContain('<html lang="en" class="dark">');
+    expect(await (await client.get('/login')).text()).toContain('<html lang="en" data-theme="dark">');
   });
 });

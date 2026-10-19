@@ -22,7 +22,7 @@ import { Pagination } from '../views/Pagination.tsx';
 import { SearchBar } from '../views/SearchBar.tsx';
 import type { AppEnv } from '../types.ts';
 import { page } from '../views/render.tsx';
-import { badge, badgeWarning, button, card, link, tagPill } from '../views/ui.ts';
+import { badge, badgeWarning, button, card, gridOverlay, link, muted, tagPill } from '../views/ui.ts';
 
 export const mapRoutes = new Hono<AppEnv>();
 
@@ -35,29 +35,31 @@ const isSortOrder = (value: string): value is SortOrder =>
 // ---------------------------------------------------------------------------
 
 const EmptyState: FC<{ hasFilters: boolean; isAdmin: boolean }> = ({ hasFilters, isAdmin }) => (
-  <div class={`mt-6 px-6 py-16 text-center ${card}`}>
-    <p class="text-4xl" aria-hidden="true">
-      {hasFilters ? '🔍' : '🗺️'}
-    </p>
-    <h2 class="mt-4 text-lg font-semibold">{hasFilters ? 'No maps match that search' : 'No maps yet'}</h2>
-    <p class="mx-auto mt-2 max-w-md text-sm text-stone-600 dark:text-stone-400">
-      {hasFilters
-        ? 'Try fewer tags, switch tag matching from All to Any, or clear the search to see everything.'
-        : isAdmin
-          ? 'Upload your first battle map to start the library.'
-          : 'An administrator has not uploaded any maps yet.'}
-    </p>
-    <div class="mt-6 flex justify-center gap-3">
-      {hasFilters && (
-        <a href="/maps?clear=1" class={button.secondary}>
-          Clear search
-        </a>
-      )}
-      {isAdmin && !hasFilters && (
-        <a href="/maps/new" class={button.primary}>
-          Upload a map
-        </a>
-      )}
+  <div class={`mt-6 ${card}`}>
+    <div class="card-body items-center py-16 text-center">
+      <p class="text-4xl" aria-hidden="true">
+        {hasFilters ? '🔍' : '🗺️'}
+      </p>
+      <h2 class="card-title">{hasFilters ? 'No maps match that search' : 'No maps yet'}</h2>
+      <p class={`max-w-md text-sm ${muted}`}>
+        {hasFilters
+          ? 'Try fewer tags, switch tag matching from All to Any, or clear the search to see everything.'
+          : isAdmin
+            ? 'Upload your first battle map to start the library.'
+            : 'An administrator has not uploaded any maps yet.'}
+      </p>
+      <div class="card-actions mt-4">
+        {hasFilters && (
+          <a href="/maps?clear=1" class={button.secondary}>
+            Clear search
+          </a>
+        )}
+        {isAdmin && !hasFilters && (
+          <a href="/maps/new" class={button.primary}>
+            Upload a map
+          </a>
+        )}
+      </div>
     </div>
   </div>
 );
@@ -179,8 +181,8 @@ mapRoutes.get('/maps', (c) => {
 // ---------------------------------------------------------------------------
 
 const MetadataRow: FC<{ term: string; children: unknown }> = ({ term, children }) => (
-  <div class="flex justify-between gap-4 border-b border-stone-100 py-2 last:border-0 dark:border-stone-800">
-    <dt class="text-sm text-stone-500 dark:text-stone-400">{term}</dt>
+  <div class="flex justify-between gap-4 py-2">
+    <dt class="text-sm text-base-content/60">{term}</dt>
     <dd class="text-right text-sm font-medium">{children}</dd>
   </div>
 );
@@ -273,37 +275,25 @@ mapRoutes.get('/maps/:uuid', (c) => {
       </div>
 
       <div class="mt-6 grid gap-6 lg:grid-cols-3">
-        <div class="lg:col-span-2">
-          {/*
-            CSS-only overlay toggle, no JavaScript involved. The checkbox is the
-            `peer`, so both following siblings can react to its checked state —
-            which is why the checkbox sits at this level rather than inside the
-            toggle row.
-          */}
-          {hasGrid && <input type="checkbox" id="grid-toggle" class="peer sr-only" />}
-
+        {/*
+          CSS only, no JavaScript involved: the grid switch shows the overlay
+          through `has-[]` on this column, and the full-size view is a daisyUI
+          modal opened and closed by a checkbox.
+        */}
+        <div class="lg:col-span-2 has-[#grid-toggle:checked]:[&_.map-grid-overlay]:block">
           {hasGrid && (
-            <div class="mb-3 flex flex-wrap items-center gap-2 peer-checked:[&>label]:border-amber-500 peer-checked:[&>label]:text-amber-700 dark:peer-checked:[&>label]:text-amber-400">
-              <label for="grid-toggle" class={`cursor-pointer select-none ${button.secondary}`}>
+            <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+              <label class="label text-sm text-base-content">
+                <input type="checkbox" id="grid-toggle" class="toggle toggle-sm" />
                 Show grid overlay
               </label>
-              <span class="text-xs text-stone-500 dark:text-stone-400">
+              <span class="text-xs text-base-content/60">
                 Check that the overlay lines up with the painted grid.
               </span>
             </div>
           )}
 
-          <div class="relative overflow-hidden rounded-xl border border-stone-200 bg-stone-100 peer-checked:[&_.map-grid-overlay]:block dark:border-stone-800 dark:bg-stone-900">
-            {/*
-              Full size on click, CSS-only like the grid toggle above. Both
-              labels drive the same checkbox: the one around the image opens the
-              view, the one behind it closes again. The checkbox sits inside this
-              container rather than beside the grid one, so the two sets of
-              `peer-checked:` rules are in different sibling groups and cannot
-              trip over each other.
-            */}
-            <input type="checkbox" id="full-size" class="peer sr-only" data-lightbox-toggle />
-
+          <figure class="relative overflow-hidden rounded-box border border-base-300 bg-base-200">
             <label for="full-size" class="block cursor-zoom-in" title="Show full size">
               <img
                 src={`/i/${map.uuid}/full`}
@@ -318,19 +308,24 @@ mapRoutes.get('/maps/:uuid', (c) => {
             {hasGrid && (
               <div
                 aria-hidden="true"
-                class="map-grid-overlay grid-overlay pointer-events-none absolute inset-0 hidden"
+                class={`map-grid-overlay pointer-events-none absolute inset-0 hidden ${gridOverlay}`}
               />
             )}
+          </figure>
 
-            {/*
-              `max-w-none` defeats the base stylesheet's `max-width: 100%`, which
-              is the whole point: the image is shown at its stored pixel size and
-              the overlay scrolls. Centred with `mx-auto` rather than flex, so an
-              image wider than the viewport is not clipped on its left edge.
-            */}
+          {/*
+            `modal-toggle` must sit directly before the modal for daisyUI to
+            open it, and daisyUI also freezes the page behind it while it is
+            checked. The box is itself a label, so a click on the map closes the
+            view as well as one on the backdrop. `max-w-none` on the image is
+            the whole point: it is shown at its stored pixel size and the box
+            scrolls.
+          */}
+          <input type="checkbox" id="full-size" class="modal-toggle" data-lightbox-toggle />
+          <div class="modal" role="dialog" aria-label={`${map.name}, full size`}>
             <label
               for="full-size"
-              class="fixed inset-0 z-50 hidden cursor-zoom-out overflow-auto bg-stone-950/90 p-4 peer-checked:block"
+              class="modal-box w-auto max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] cursor-zoom-out overflow-auto p-0"
             >
               <img
                 src={`/i/${map.uuid}/full`}
@@ -340,82 +335,89 @@ mapRoutes.get('/maps/:uuid', (c) => {
                 // Same URL as the image above, so opening the view costs a cache
                 // hit rather than a second download — but not decoded until then.
                 loading="lazy"
-                class="mx-auto max-w-none"
+                class="max-w-none"
               />
               <span class="sr-only">Close the full-size view</span>
+            </label>
+            <label for="full-size" class="modal-backdrop">
+              Close
             </label>
           </div>
         </div>
 
         <aside class="space-y-6">
-          <div class={`p-5 ${card}`}>
-            <h2 class="text-sm font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">Details</h2>
-            <dl class="mt-3">
-              <MetadataRow term="Image size">
-                {map.imageWidth} × {map.imageHeight} px
-              </MetadataRow>
-              <MetadataRow term="File size">{formatBytes(map.fileSize)}</MetadataRow>
-              <MetadataRow term="Format">{FORMAT_LABELS[map.format]}</MetadataRow>
-              {map.variant && <MetadataRow term="Variant">{map.variant}</MetadataRow>}
-              <MetadataRow term="Added">
-                <Timestamp epochMs={map.createdAt} />
-              </MetadataRow>
-            </dl>
+          <div class={`card-sm ${card}`}>
+            <div class="card-body">
+              <h2 class="card-title text-xs uppercase tracking-wide text-base-content/60">Details</h2>
+              <dl class="divide-y divide-base-300">
+                <MetadataRow term="Image size">
+                  {map.imageWidth} × {map.imageHeight} px
+                </MetadataRow>
+                <MetadataRow term="File size">{formatBytes(map.fileSize)}</MetadataRow>
+                <MetadataRow term="Format">{FORMAT_LABELS[map.format]}</MetadataRow>
+                {map.variant && <MetadataRow term="Variant">{map.variant}</MetadataRow>}
+                <MetadataRow term="Added">
+                  <Timestamp epochMs={map.createdAt} />
+                </MetadataRow>
+              </dl>
+            </div>
           </div>
 
-          <div class={`p-5 ${card}`}>
-            <h2 class="text-sm font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">Grid</h2>
-            {hasGrid ? (
-              <dl class="mt-3">
-                <MetadataRow term="Grid size">{map.gridSize} px per square</MetadataRow>
-                <MetadataRow term="Squares across">{map.gridWidth}</MetadataRow>
-                <MetadataRow term="Squares down">{map.gridHeight}</MetadataRow>
-                <MetadataRow term="Source">
-                  {map.gridSource === 'estimated' ? (
-                    <span class={badgeWarning}>{GRID_SOURCE_LABEL[map.gridSource]}</span>
-                  ) : (
-                    GRID_SOURCE_LABEL[map.gridSource]
+          <div class={`card-sm ${card}`}>
+            <div class="card-body">
+              <h2 class="card-title text-xs uppercase tracking-wide text-base-content/60">Grid</h2>
+              {hasGrid ? (
+                <dl class="divide-y divide-base-300">
+                  <MetadataRow term="Grid size">{map.gridSize} px per square</MetadataRow>
+                  <MetadataRow term="Squares across">{map.gridWidth}</MetadataRow>
+                  <MetadataRow term="Squares down">{map.gridHeight}</MetadataRow>
+                  <MetadataRow term="Source">
+                    {map.gridSource === 'estimated' ? (
+                      <span class={badgeWarning}>{GRID_SOURCE_LABEL[map.gridSource]}</span>
+                    ) : (
+                      GRID_SOURCE_LABEL[map.gridSource]
+                    )}
+                  </MetadataRow>
+                  {map.upscaleFactor > 1 && (
+                    <MetadataRow term="Upscaled">{map.upscaleFactor.toFixed(3)}×</MetadataRow>
                   )}
-                </MetadataRow>
-                {map.upscaleFactor > 1 && (
-                  <MetadataRow term="Upscaled">{map.upscaleFactor.toFixed(3)}×</MetadataRow>
-                )}
-              </dl>
-            ) : (
-              <div class="mt-3 text-sm text-stone-600 dark:text-stone-400">
-                <p>No grid recorded for this map.</p>
-                {user.role === 'admin' && (
-                  <p class="mt-2">
-                    <a href={`/maps/${map.uuid}/edit`} class={link}>
-                      Add the grid details
-                    </a>{' '}
-                    so this map can be scaled correctly in a virtual tabletop.
-                  </p>
-                )}
-              </div>
-            )}
+                </dl>
+              ) : (
+                <div class={`text-sm ${muted}`}>
+                  <p>No grid recorded for this map.</p>
+                  {user.role === 'admin' && (
+                    <p class="mt-2">
+                      <a href={`/maps/${map.uuid}/edit`} class={link}>
+                        Add the grid details
+                      </a>{' '}
+                      so this map can be scaled correctly in a virtual tabletop.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {siblings.length > 0 && (
-            <div class={`p-5 ${card}`}>
-              <h2 class="text-sm font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">
-                Other variants
-              </h2>
-              <ul class="mt-3 space-y-2">
-                {siblings.map((sibling) => (
-                  <li>
-                    <a href={`/maps/${sibling.uuid}`} class="flex items-center gap-3 text-sm hover:underline">
+            <div class={`card-sm ${card}`}>
+              <div class="card-body">
+                <h2 class="card-title text-xs uppercase tracking-wide text-base-content/60">Other variants</h2>
+                <ul class="list">
+                  {siblings.map((sibling) => (
+                    <li class="list-row items-center px-0 py-2">
                       <img
                         src={`/i/${sibling.uuid}/thumb`}
                         alt=""
                         loading="lazy"
-                        class="h-10 w-10 rounded object-cover"
+                        class="size-10 rounded-field object-cover"
                       />
-                      <span class="font-medium">{sibling.variant || 'default'}</span>
-                    </a>
-                  </li>
-                ))}
-              </ul>
+                      <a href={`/maps/${sibling.uuid}`} class={`text-sm font-medium ${link}`}>
+                        {sibling.variant || 'default'}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
           )}
         </aside>

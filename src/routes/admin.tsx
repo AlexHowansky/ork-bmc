@@ -45,6 +45,7 @@ import type { Flash } from '../views/Layout.tsx';
 import { MapForm, storageDescription, type MapFormMode, type MapFormValues, type StagedUpload } from '../views/MapForm.tsx';
 import { page, setFlash } from '../views/render.tsx';
 import { UpgradeOffer } from '../views/UpgradeOffer.tsx';
+import { alert, muted } from '../views/ui.ts';
 
 export const adminRoutes = new Hono<AppEnv>();
 
@@ -254,7 +255,7 @@ adminRoutes.get('/maps/new', (c) =>
     { title: 'Upload a map' },
     <div class="mx-auto max-w-3xl">
       <h1 class="text-2xl font-bold tracking-tight">Upload a map</h1>
-      <p class="mt-2 text-sm text-stone-600 dark:text-stone-400">
+      <p class={`mt-2 text-sm ${muted}`}>
         The image is converted to {storageDescription()} and stored under a new identifier.
       </p>
       <div class="mt-8">
@@ -904,11 +905,8 @@ function renderFormError(
     { title: mode === 'edit' ? 'Edit map' : 'Upload a map', status: appError.status },
     <div class="mx-auto max-w-3xl">
       <h1 class="text-2xl font-bold tracking-tight">{heading}</h1>
-      <div
-        role="alert"
-        class="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/60 dark:text-red-200"
-      >
-        {appError.userMessage}
+      <div role="alert" class={`mt-6 ${alert.error}`}>
+        <span>{appError.userMessage}</span>
       </div>
       {/* Whatever was found stays on screen: the matches are the reason the
           admin is being asked for a variant in the first place, and a better

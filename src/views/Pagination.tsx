@@ -33,19 +33,14 @@ function pageWindow(page: number, totalPages: number): (number | 'gap')[] {
   return result;
 }
 
-const linkClass =
-  'inline-flex min-w-9 items-center justify-center rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm ' +
-  'font-medium text-stone-700 transition hover:bg-stone-50 focus-visible:outline-2 focus-visible:outline-offset-2 ' +
-  'focus-visible:outline-amber-600 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700';
+const linkClass = 'join-item btn btn-sm min-w-9';
 
-const currentClass =
-  'inline-flex min-w-9 items-center justify-center rounded-lg border border-amber-600 bg-amber-600 px-3 py-2 ' +
-  'text-sm font-semibold text-white dark:border-amber-500 dark:bg-amber-500 dark:text-stone-950';
+const currentClass = 'join-item btn btn-sm btn-active min-w-9';
 
 export const Pagination: FC<PaginationProps> = ({ page, totalPages, total, query }) => {
   if (totalPages <= 1) {
     return (
-      <p class="mt-8 text-sm text-stone-500 dark:text-stone-400">
+      <p class="mt-8 text-sm text-base-content/60">
         {total} map{total === 1 ? '' : 's'}.
       </p>
     );
@@ -53,11 +48,11 @@ export const Pagination: FC<PaginationProps> = ({ page, totalPages, total, query
 
   return (
     <nav class="mt-8 flex flex-wrap items-center justify-between gap-4" aria-label="Pagination">
-      <p class="text-sm text-stone-500 dark:text-stone-400">
+      <p class="text-sm text-base-content/60">
         Page {page} of {totalPages} · {total} map{total === 1 ? '' : 's'}
       </p>
 
-      <div class="flex flex-wrap items-center gap-1">
+      <div class="join">
         {page > 1 && (
           <a href={hrefFor(query, page - 1)} class={linkClass} rel="prev">
             Previous
@@ -66,7 +61,7 @@ export const Pagination: FC<PaginationProps> = ({ page, totalPages, total, query
 
         {pageWindow(page, totalPages).map((entry) =>
           entry === 'gap' ? (
-            <span class="px-2 text-stone-400 dark:text-stone-600" aria-hidden="true">
+            <span class="join-item btn btn-sm btn-disabled" aria-hidden="true">
               …
             </span>
           ) : (

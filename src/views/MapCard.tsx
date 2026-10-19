@@ -2,7 +2,7 @@
 import type { FC } from 'hono/jsx';
 
 import type { MapRecord } from '../models/maps.ts';
-import { badge, tagPill, thumbWarning } from './ui.ts';
+import { badge, card, tagPill, thumbWarning } from './ui.ts';
 
 /**
  * A grid is only usable when all three numbers are present, so that is what
@@ -15,10 +15,10 @@ const hasGrid = (map: MapRecord): boolean =>
 export const MapCard: FC<{ map: MapRecord }> = ({ map }) => (
   <a
     href={`/maps/${map.uuid}`}
-    class="group block overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600 dark:border-stone-800 dark:bg-stone-900"
+    class={`group card-sm overflow-hidden transition hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${card}`}
   >
     {/* A fixed aspect ratio keeps the grid from reflowing as thumbnails load. */}
-    <div class="relative aspect-4/3 overflow-hidden bg-stone-100 dark:bg-stone-800">
+    <figure class="relative aspect-4/3 bg-base-200">
       <img
         src={`/i/${map.uuid}/thumb`}
         alt={`Thumbnail of ${map.name}`}
@@ -41,17 +41,17 @@ export const MapCard: FC<{ map: MapRecord }> = ({ map }) => (
           <span class="sr-only">Grid size unknown</span>
         </span>
       )}
-    </div>
+    </figure>
 
-    <div class="p-3">
+    <div class="card-body">
       <div class="flex items-start justify-between gap-2">
-        <h3 class="truncate text-sm font-semibold" title={map.name}>
+        <h3 class="card-title truncate" title={map.name}>
           {map.name}
         </h3>
         {map.variant && <span class={`shrink-0 ${badge}`}>{map.variant}</span>}
       </div>
 
-      <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">
+      <p class="text-xs text-base-content/60">
         {map.imageWidth} × {map.imageHeight}
         {hasGrid(map) && (
           <> · {map.gridWidth}×{map.gridHeight} squares @ {map.gridSize}px</>
@@ -59,12 +59,12 @@ export const MapCard: FC<{ map: MapRecord }> = ({ map }) => (
       </p>
 
       {map.tags.length > 0 && (
-        <div class="mt-2 flex flex-wrap gap-1">
+        <div class="card-actions gap-1">
           {map.tags.slice(0, 4).map((tag) => (
             <span class={tagPill}>{tag}</span>
           ))}
           {map.tags.length > 4 && (
-            <span class="text-xs text-stone-400 dark:text-stone-500">+{map.tags.length - 4}</span>
+            <span class="text-xs text-base-content/50">+{map.tags.length - 4}</span>
           )}
         </div>
       )}

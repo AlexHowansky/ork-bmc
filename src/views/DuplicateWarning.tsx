@@ -3,7 +3,7 @@ import type { FC } from 'hono/jsx';
 
 import { FINGERPRINT_BITS } from '../images/fingerprint.ts';
 import type { SimilarMap } from '../models/maps.ts';
-import { badge, badgeWarning, card, link } from './ui.ts';
+import { badge, badgeWarning, card, link, warningPanel } from './ui.ts';
 
 /**
  * Describes how close a match is without making the admin read a bit count.
@@ -26,7 +26,7 @@ export function similarityPercent(distance: number): number {
 }
 
 const Match: FC<{ similar: SimilarMap }> = ({ similar }) => (
-  <li class="flex items-center gap-4 py-3">
+  <li class="list-row items-center">
     <img
       src={`/i/${similar.map.uuid}/thumb`}
       alt={`Thumbnail of ${similar.map.name}`}
@@ -34,9 +34,9 @@ const Match: FC<{ similar: SimilarMap }> = ({ similar }) => (
       decoding="async"
       width="72"
       height="72"
-      class="h-18 w-18 shrink-0 rounded-lg border border-stone-200 object-cover dark:border-stone-700"
+      class="size-18 rounded-field border border-base-300 object-cover"
     />
-    <div class="min-w-0 flex-1">
+    <div class="min-w-0">
       <div class="flex flex-wrap items-center gap-2">
         {/* A new tab, so comparing the two does not throw away the staged upload. */}
         <a
@@ -50,7 +50,7 @@ const Match: FC<{ similar: SimilarMap }> = ({ similar }) => (
         </a>
         {similar.map.variant && <span class={badge}>{similar.map.variant}</span>}
       </div>
-      <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">
+      <p class="mt-1 text-xs text-base-content/60">
         {similarityLabel(similar.distance)} — {similarityPercent(similar.distance)}% match ·{' '}
         {similar.map.imageWidth} × {similar.map.imageHeight}
         {similar.map.gridSize !== null && <> · {similar.map.gridSize}px squares</>}
@@ -60,32 +60,29 @@ const Match: FC<{ similar: SimilarMap }> = ({ similar }) => (
 );
 
 export const DuplicateWarning: FC<{ matches: SimilarMap[] }> = ({ matches }) => (
-  <div
-    role="alert"
-    class="rounded-xl border border-amber-300 bg-amber-50 p-6 dark:border-amber-900 dark:bg-amber-950/40"
-  >
-    <div class="flex flex-wrap items-center gap-3">
-      <span class={badgeWarning}>Possible duplicate</span>
-      <h2 class="text-lg font-semibold text-amber-900 dark:text-amber-200">
-        {matches.length === 1
-          ? 'This looks like a map you already have'
-          : `This looks like ${matches.length} maps you already have`}
-      </h2>
-    </div>
+  <div role="alert" class={warningPanel}>
+    <div class="card-body">
+      <div class="flex flex-wrap items-center gap-3">
+        <span class={badgeWarning}>Possible duplicate</span>
+        <h2 class="card-title">
+          {matches.length === 1
+            ? 'This looks like a map you already have'
+            : `This looks like ${matches.length} maps you already have`}
+        </h2>
+      </div>
 
-    <p class="mt-3 text-sm text-amber-900 dark:text-amber-200">
-      Nothing has been saved yet. If this really is a new version of the same map — a night-time render, a flooded
-      one, a copy with the tokens removed — keep the name below as it is and give this one a{' '}
-      <strong class="font-semibold">variant</strong> instead. It will then sit alongside the map it belongs with
-      rather than starting a second entry for the same place.
-    </p>
+      <p>
+        Nothing has been saved yet. If this really is a new version of the same map — a night-time render, a flooded
+        one, a copy with the tokens removed — keep the name below as it is and give this one a{' '}
+        <strong class="font-semibold">variant</strong> instead. It will then sit alongside the map it belongs with
+        rather than starting a second entry for the same place.
+      </p>
 
-    <p class="mt-2 text-sm text-amber-900 dark:text-amber-200">
-      If it is genuinely a different map, change the name to whatever you meant and save it as normal.
-    </p>
+      <p>
+        If it is genuinely a different map, change the name to whatever you meant and save it as normal.
+      </p>
 
-    <div class={`mt-5 px-4 ${card}`}>
-      <ul class="divide-y divide-stone-100 dark:divide-stone-800">
+      <ul class={`list mt-2 ${card}`}>
         {matches.map((similar) => (
           <Match similar={similar} />
         ))}

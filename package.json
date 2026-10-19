@@ -17,6 +17,7 @@
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",
     "@types/bun": "latest",
+    "daisyui": "^5.7.50",
     "tailwindcss": "^4.3.3"
   },
   "peerDependencies": {

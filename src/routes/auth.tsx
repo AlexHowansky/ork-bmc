@@ -19,7 +19,7 @@ import { CsrfInput } from '../views/Layout.tsx';
 import { clientIp, consumeToken, resetBucket } from '../security/ratelimit.ts';
 import type { AppEnv } from '../types.ts';
 import { page, setFlash } from '../views/render.tsx';
-import { button, card, fieldError, input, inputInvalid, label } from '../views/ui.ts';
+import { alert, button, card, fieldError, input, inputInvalid, legend, muted } from '../views/ui.ts';
 
 export const authRoutes = new Hono<AppEnv>();
 
@@ -45,60 +45,59 @@ interface LoginPageProps {
 
 const LoginPage: FC<LoginPageProps> = ({ email, next, csrfToken, error }) => (
   <div class="mx-auto max-w-md">
-    <div class={`p-6 sm:p-8 ${card}`}>
-      <h1 class="text-2xl font-bold tracking-tight">Sign in</h1>
-      <p class="mt-2 text-sm text-stone-600 dark:text-stone-400">
-        Battle Map Curator accounts are created by an administrator.
-      </p>
+    <div class={card}>
+      <div class="card-body sm:p-8">
+        <h1 class="card-title text-2xl">Sign in</h1>
+        <p class={`text-sm ${muted}`}>
+          Battle Map Curator accounts are created by an administrator.
+        </p>
 
-      {error && (
-        <div
-          role="alert"
-          class="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/60 dark:text-red-200"
-        >
-          {error}
-        </div>
-      )}
+        {error && (
+          <div role="alert" class={`mt-4 ${alert.error}`}>
+            <span>{error}</span>
+          </div>
+        )}
 
-      <form method="post" action="/login" class="mt-6 space-y-5">
-        <CsrfInput token={csrfToken} />
-        <input type="hidden" name="next" value={next} />
+        <form method="post" action="/login" class="mt-2">
+          <CsrfInput token={csrfToken} />
+          <input type="hidden" name="next" value={next} />
 
-        <div>
-          <label for="email" class={label}>
-            Email
-          </label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            value={email}
-            required
-            autocomplete="username"
-            autofocus
-            class={`mt-1 ${error ? inputInvalid : input}`}
-          />
-        </div>
+          <fieldset class="fieldset">
+            <label for="email" class={legend}>
+              Email
+            </label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              value={email}
+              required
+              autocomplete="username"
+              autofocus
+              class={error ? inputInvalid : input}
+            />
+          </fieldset>
 
-        <div>
-          <label for="password" class={label}>
-            Password
-          </label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            required
-            autocomplete="current-password"
-            class={`mt-1 ${error ? inputInvalid : input}`}
-          />
-          {error && <p class={fieldError}>Check your email and password and try again.</p>}
-        </div>
+          <fieldset class="fieldset">
+            <label for="password" class={legend}>
+              Password
+            </label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              required
+              autocomplete="current-password"
+              class={error ? inputInvalid : input}
+            />
+            {error && <p class={fieldError}>Check your email and password and try again.</p>}
+          </fieldset>
 
-        <button type="submit" class={`w-full ${button.primary}`}>
-          Sign in
-        </button>
-      </form>
+          <button type="submit" class={`mt-4 w-full ${button.primary}`}>
+            Sign in
+          </button>
+        </form>
+      </div>
     </div>
   </div>
 );

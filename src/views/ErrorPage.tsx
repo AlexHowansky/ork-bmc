@@ -6,7 +6,7 @@
  */
 import type { FC } from 'hono/jsx';
 
-import { button, card } from './ui.ts';
+import { button, muted } from './ui.ts';
 
 export interface ErrorPageProps {
   status: number;
@@ -27,9 +27,9 @@ const HEADINGS: Record<number, string> = {
 
 export const ErrorPage: FC<ErrorPageProps> = ({ status, message, requestId }) => (
   <div class="mx-auto max-w-lg text-center">
-    <p class="text-6xl font-black tracking-tight text-amber-600 dark:text-amber-500">{status}</p>
+    <p class="text-6xl font-black tracking-tight text-primary">{status}</p>
     <h1 class="mt-4 text-2xl font-bold tracking-tight">{HEADINGS[status] ?? 'Something went wrong'}</h1>
-    <p class="mt-3 text-stone-600 dark:text-stone-400">{message}</p>
+    <p class={`mt-3 ${muted}`}>{message}</p>
 
     <div class="mt-8 flex justify-center gap-3">
       <a href="/maps" class={button.primary}>
@@ -37,8 +37,8 @@ export const ErrorPage: FC<ErrorPageProps> = ({ status, message, requestId }) =>
       </a>
     </div>
 
-    <div class={`mt-8 px-4 py-3 text-xs text-stone-500 dark:text-stone-400 ${card}`}>
+    <p class="mt-8 text-xs text-base-content/60">
       If you need help, quote reference <code class="font-mono font-semibold">{requestId}</code>.
-    </div>
+    </p>
   </div>
 );

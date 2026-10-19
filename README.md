@@ -295,8 +295,13 @@ data/images/60/601eece7-4038-4922-9f64-8cc2247f7bd3_thumb.webp
   app is fully usable with JavaScript disabled; `public/app.js` only adds an
   instant theme switch and a delete confirmation.
 - **Light and dark mode need no JavaScript.** A cookie records the preference
-  and the server renders the matching class, so the first paint is already
-  correct. With no preference set, CSS follows the operating system.
+  and the server renders the matching daisyUI `data-theme`, so the first paint
+  is already correct. With no preference set, CSS follows the operating system.
+- **UI components are daisyUI**, compiled in with Tailwind at build time — a
+  dev dependency only, nothing extra at runtime. It uses daisyUI's stock light
+  and dark themes and no custom CSS; shared class strings live in
+  `src/views/ui.ts`. The full-size map view is a daisyUI modal driven by a
+  checkbox, so it still needs no JavaScript.
 - **Thumbnails are lossy** (quality 90 by default); stored maps may be lossy
   depending on configuration.
 
