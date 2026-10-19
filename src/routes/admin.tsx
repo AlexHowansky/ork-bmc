@@ -253,7 +253,7 @@ adminRoutes.get('/maps/new', (c) =>
   page(
     c,
     { title: 'Upload a map' },
-    <div class="mx-auto max-w-3xl">
+    <div class="mx-auto max-w-7xl">
       <h1 class="text-2xl font-bold tracking-tight">Upload a map</h1>
       <p class={`mt-2 text-sm ${muted}`}>
         The image is converted to {storageDescription()} and stored under a new identifier.
@@ -737,7 +737,7 @@ function renderReview(
       title: matches.length > 0 ? 'Possible duplicate' : 'A better copy is available',
       ...(flash ? { flash } : {}),
     },
-    <div class="mx-auto max-w-3xl">
+    <div class="mx-auto max-w-7xl">
       <h1 class="text-2xl font-bold tracking-tight">Upload a map</h1>
       {matches.length > 0 && (
         <div class="mt-6">
@@ -778,7 +778,7 @@ adminRoutes.get('/maps/:uuid/edit', (c) => {
   return page(
     c,
     { title: `Edit ${map.name}` },
-    <div class="mx-auto max-w-3xl">
+    <div class="mx-auto max-w-7xl">
       <h1 class="text-2xl font-bold tracking-tight">Edit “{map.name}”</h1>
       <div class="mt-8">
         <MapForm
@@ -903,7 +903,7 @@ function renderFormError(
   return page(
     c,
     { title: mode === 'edit' ? 'Edit map' : 'Upload a map', status: appError.status },
-    <div class="mx-auto max-w-3xl">
+    <div class="mx-auto max-w-7xl">
       <h1 class="text-2xl font-bold tracking-tight">{heading}</h1>
       <div role="alert" class={`mt-6 ${alert.error}`}>
         <span>{appError.userMessage}</span>
