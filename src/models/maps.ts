@@ -356,6 +356,14 @@ export function findSiblingVariants(uuid: string, name: string): MapRecord[] {
   return rows.map(toMap);
 }
 
+/** Every map with this name, whatever its variant, for asking whether an upload is another one. */
+export function findMapsNamed(name: string): MapRecord[] {
+  const rows = db
+    .query('SELECT * FROM maps WHERE name = ? COLLATE NOCASE ORDER BY variant COLLATE NOCASE')
+    .all(name) as MapRow[];
+  return rows.map(toMap);
+}
+
 export function countMaps(): number {
   return (db.query('SELECT COUNT(*) AS n FROM maps').get() as { n: number }).n;
 }

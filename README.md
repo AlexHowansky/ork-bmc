@@ -139,7 +139,10 @@ far a spacing must stand out from the alternatives before it is believed, and
 
 **Variants.** A variant is an alternate version of the same map — `day`,
 `night`, `flooded`. Maps sharing a name are linked to each other, and each
-name/variant pair must be unique.
+name/variant pair must be unique. Upload a new map under a name the library
+already has, with no variant, and the upload pauses to show you the maps of
+that name: give it a variant to file it alongside them, or a different name if
+it is a different map.
 
 **Duplicate detection.** Every upload is fingerprinted, and if it looks like a
 map already in the library the upload pauses rather than joining it. You are

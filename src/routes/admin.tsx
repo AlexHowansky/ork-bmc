@@ -20,6 +20,7 @@ import {
   deleteMap,
   findMap,
   filenameFromUrl,
+  findMapsNamed,
   findSimilarMaps,
   nameFromFilename,
   parseTagInput,
@@ -41,6 +42,7 @@ import type { AppEnv } from '../types.ts';
 import { findHigherResolution } from '../websearch/index.ts';
 import { fetchRemoteImage } from '../websearch/fetchImage.ts';
 import { DuplicateWarning } from '../views/DuplicateWarning.tsx';
+import { NameTaken } from '../views/NameTaken.tsx';
 import type { Flash } from '../views/Layout.tsx';
 import { MapForm, storageDescription, type MapFormMode, type MapFormValues, type StagedUpload } from '../views/MapForm.tsx';
 import { page, setFlash } from '../views/render.tsx';
@@ -364,14 +366,19 @@ async function createFromUpload(c: Context<AppEnv>, body: Record<string, unknown
 
     const matches = findSimilarMaps(processed.fingerprint);
     const upgrades = await findHigherResolution(pending, { wanted: wantsWebSearch(body), logger });
+    // A name already in use is a question only when no variant was given: one
+    // that was is already the answer, and a variant the library has too is
+    // refused by `createMap` with a message of its own.
+    const namesakes = parsed.variant === '' ? findMapsNamed(parsed.name) : [];
 
-    if (matches.length > 0 || upgrades > 0) {
+    if (matches.length > 0 || upgrades > 0 || namesakes.length > 0) {
       logger.info('upload held for review', {
         uuid: pending.uuid,
         fingerprint: pending.fingerprint,
         matches: matches.length,
         ...(matches[0] ? { nearest: matches[0].distance } : {}),
         upgrades,
+        namesakes: namesakes.length,
       });
 
       return renderReview(
@@ -730,11 +737,19 @@ function renderReview(
   flash?: Flash,
 ): Response {
   const candidates = remainingCandidates(pending);
+  // Not alongside a duplicate warning, which already offers the same choice
+  // about the very maps this would list.
+  const namesakes = matches.length === 0 && values.variant === '' ? findMapsNamed(values.name) : [];
 
   return page(
     c,
     {
-      title: matches.length > 0 ? 'Possible duplicate' : 'A better copy is available',
+      title:
+        matches.length > 0
+          ? 'Possible duplicate'
+          : namesakes.length > 0
+            ? 'Name already in use'
+            : 'A better copy is available',
       ...(flash ? { flash } : {}),
     },
     <div class="mx-auto max-w-7xl">
@@ -742,6 +757,11 @@ function renderReview(
       {matches.length > 0 && (
         <div class="mt-6">
           <DuplicateWarning matches={matches} />
+        </div>
+      )}
+      {namesakes.length > 0 && (
+        <div class="mt-6">
+          <NameTaken name={values.name} maps={namesakes} />
         </div>
       )}
       {candidates.length > 0 && (

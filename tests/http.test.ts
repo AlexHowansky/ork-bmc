@@ -916,6 +916,34 @@ describe('duplicate detection', () => {
     expect((await confirm(admin, staged, { name: 'Toll Bridge', variant: 'flooded' })).status).toBe(302);
   });
 
+  test('a new image under a name already in use is held back to ask about a variant', async () => {
+    const first = await upload(admin, await makeMapPng(400, 300, 50), { name: 'Gallows Hill' });
+    expect(first.status).toBe(302);
+
+    // A different picture, so this is the name check and not the fingerprint one.
+    const second = await upload(admin, await makeMapPng(400, 300, 50), { name: 'Gallows Hill' });
+    expect(second.status).toBe(200);
+
+    const html = await second.text();
+    expect(html).toContain('Name already in use');
+    expect(html).not.toContain('This looks like a map you already have');
+    expect(html).toContain(`/i/${uuidFromRedirect(first)}/thumb`);
+    const staged = stagedUuidFrom(html);
+
+    // Either answer saves it: a variant…
+    expect((await confirm(admin, staged, { name: 'Gallows Hill', variant: 'winter' })).status).toBe(302);
+
+    // …or, for the next one, a name of its own.
+    const third = await upload(admin, await makeMapPng(400, 300, 50), { name: 'Gallows Hill' });
+    expect((await confirm(admin, stagedUuidFrom(await third.text()), { name: 'Gallows Gate' })).status).toBe(302);
+  });
+
+  test('a name already in use is not a question when a variant was given', async () => {
+    await upload(admin, await makeMapPng(400, 300, 50), { name: 'Salt Marsh' });
+    const second = await upload(admin, await makeMapPng(400, 300, 50), { name: 'Salt Marsh', variant: 'high tide' });
+    expect(second.status).toBe(302);
+  });
+
   test('discarding removes the staged row and both files', async () => {
     const image = await makeMapPng(400, 300, 50);
     await upload(admin, image, { name: 'Discarded Ruin' });
