@@ -236,118 +236,44 @@ mapRoutes.get('/maps/:uuid', (c) => {
     },
     <div>
       {/* No back link: the nav bar carries the way back to the listing. */}
-      <div class="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 class="text-2xl font-bold tracking-tight">
-            {map.name}
-            {map.variant && <span class={`ml-3 align-middle ${badge}`}>{map.variant}</span>}
-          </h1>
-          {map.tags.length > 0 && (
-            <div class="mt-3 flex flex-wrap gap-1.5">
-              {map.tags.map((tag) => (
-                <a href={`/maps?tags=${encodeURIComponent(tag)}`} class={tagPill}>
-                  {tag}
-                </a>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <a href={`/i/${map.uuid}/download`} class={button.primary}>
-            Download
-          </a>
-          {user.role === 'admin' && (
-            <>
-              <a href={`/maps/${map.uuid}/edit`} class={button.secondary}>
-                Edit
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight">
+          {map.name}
+          {map.variant && <span class={`ml-3 align-middle ${badge}`}>{map.variant}</span>}
+        </h1>
+        {map.tags.length > 0 && (
+          <div class="mt-3 flex flex-wrap gap-1.5">
+            {map.tags.map((tag) => (
+              <a href={`/maps?tags=${encodeURIComponent(tag)}`} class={tagPill}>
+                {tag}
               </a>
-              {/* A POST, so a crawler or prefetch cannot delete a map. */}
-              <form method="post" action={`/maps/${map.uuid}/delete`} data-confirm-delete>
-                <CsrfInput token={c.get('csrfToken')} />
-                <button type="submit" class={button.danger}>
-                  Delete
-                </button>
-              </form>
-            </>
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      <div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        {/*
-          CSS only, no JavaScript involved: the grid switch shows the overlay
-          through `has-[]` on this column, and the full-size view is a daisyUI
-          modal opened and closed by a checkbox.
-        */}
-        <div class="has-[#grid-toggle:checked]:[&_.map-grid-overlay]:block">
-          {hasGrid && (
-            <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1">
-              <label class="label text-sm text-base-content">
-                <input type="checkbox" id="grid-toggle" class="toggle toggle-sm" />
-                Show grid overlay
-              </label>
-              <span class="text-xs text-base-content/60">
-                Check that the overlay lines up with the painted grid.
-              </span>
-            </div>
-          )}
-
-          {/* Never wider than the image's own pixels: `w-fit` shrinks the
-              figure to the image, so the overlay still covers it exactly. */}
-          <figure class="relative w-fit max-w-full overflow-hidden rounded-box border border-base-300 bg-base-200">
-            <label for="full-size" class="block cursor-zoom-in" title="Show full size">
-              <img
-                src={`/i/${map.uuid}/full`}
-                alt={map.name}
-                width={map.imageWidth}
-                height={map.imageHeight}
-                class="block h-auto max-w-full"
-              />
-              <span class="sr-only"> — show full size</span>
-            </label>
-
-            {hasGrid && (
-              <div
-                aria-hidden="true"
-                class={`map-grid-overlay pointer-events-none absolute inset-0 hidden ${gridOverlay}`}
-              />
-            )}
-          </figure>
-
-          {/*
-            `modal-toggle` must sit directly before the modal for daisyUI to
-            open it, and daisyUI also freezes the page behind it while it is
-            checked. The box is itself a label, so a click on the map closes the
-            view as well as one on the backdrop. `max-w-none` on the image is
-            the whole point: it is shown at its stored pixel size and the box
-            scrolls.
-          */}
-          <input type="checkbox" id="full-size" class="modal-toggle" data-lightbox-toggle />
-          <div class="modal" role="dialog" aria-label={`${map.name}, full size`}>
-            <label
-              for="full-size"
-              class="modal-box w-auto max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] cursor-zoom-out overflow-auto p-0"
-            >
-              <img
-                src={`/i/${map.uuid}/full`}
-                alt=""
-                width={map.imageWidth}
-                height={map.imageHeight}
-                // Same URL as the image above, so opening the view costs a cache
-                // hit rather than a second download — but not decoded until then.
-                loading="lazy"
-                class="max-w-none"
-              />
-              <span class="sr-only">Close the full-size view</span>
-            </label>
-            <label for="full-size" class="modal-backdrop">
-              Close
-            </label>
-          </div>
-        </div>
-
+      <div class="mt-6 grid gap-6 lg:grid-cols-[22rem_minmax(0,1fr)]">
         <aside class="space-y-6">
+          <div class="flex flex-wrap items-center gap-2">
+            <a href={`/i/${map.uuid}/download`} class={button.primary}>
+              Download
+            </a>
+            {user.role === 'admin' && (
+              <>
+                <a href={`/maps/${map.uuid}/edit`} class={button.secondary}>
+                  Edit
+                </a>
+                {/* A POST, so a crawler or prefetch cannot delete a map. */}
+                <form method="post" action={`/maps/${map.uuid}/delete`} data-confirm-delete>
+                  <CsrfInput token={c.get('csrfToken')} />
+                  <button type="submit" class={button.danger}>
+                    Delete
+                  </button>
+                </form>
+              </>
+            )}
+          </div>
+
           <div class={`card-sm ${card}`}>
             <div class="card-body">
               <h2 class="card-title text-xs uppercase tracking-wide text-base-content/60">Details</h2>
@@ -423,6 +349,78 @@ mapRoutes.get('/maps/:uuid', (c) => {
             </div>
           )}
         </aside>
+
+        {/*
+          CSS only, no JavaScript involved: the grid switch shows the overlay
+          through `has-[]` on this column, and the full-size view is a daisyUI
+          modal opened and closed by a checkbox.
+        */}
+        <div class="has-[#grid-toggle:checked]:[&_.map-grid-overlay]:block">
+          {hasGrid && (
+            <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+              <label class="label text-sm text-base-content">
+                <input type="checkbox" id="grid-toggle" class="toggle toggle-sm" />
+                Show grid overlay
+              </label>
+              <span class="text-xs text-base-content/60">
+                Check that the overlay lines up with the painted grid.
+              </span>
+            </div>
+          )}
+
+          {/* Never wider than the image's own pixels: `w-fit` shrinks the
+              figure to the image, so the overlay still covers it exactly. */}
+          <figure class="relative w-fit max-w-full overflow-hidden rounded-box border border-base-300 bg-base-200">
+            <label for="full-size" class="block cursor-zoom-in" title="Show full size">
+              <img
+                src={`/i/${map.uuid}/full`}
+                alt={map.name}
+                width={map.imageWidth}
+                height={map.imageHeight}
+                class="block h-auto max-w-full"
+              />
+              <span class="sr-only"> — show full size</span>
+            </label>
+
+            {hasGrid && (
+              <div
+                aria-hidden="true"
+                class={`map-grid-overlay pointer-events-none absolute inset-0 hidden ${gridOverlay}`}
+              />
+            )}
+          </figure>
+
+          {/*
+            `modal-toggle` must sit directly before the modal for daisyUI to
+            open it, and daisyUI also freezes the page behind it while it is
+            checked. The box is itself a label, so a click on the map closes the
+            view as well as one on the backdrop. `max-w-none` on the image is
+            the whole point: it is shown at its stored pixel size and the box
+            scrolls.
+          */}
+          <input type="checkbox" id="full-size" class="modal-toggle" data-lightbox-toggle />
+          <div class="modal" role="dialog" aria-label={`${map.name}, full size`}>
+            <label
+              for="full-size"
+              class="modal-box w-auto max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] cursor-zoom-out overflow-auto p-0"
+            >
+              <img
+                src={`/i/${map.uuid}/full`}
+                alt=""
+                width={map.imageWidth}
+                height={map.imageHeight}
+                // Same URL as the image above, so opening the view costs a cache
+                // hit rather than a second download — but not decoded until then.
+                loading="lazy"
+                class="max-w-none"
+              />
+              <span class="sr-only">Close the full-size view</span>
+            </label>
+            <label for="full-size" class="modal-backdrop">
+              Close
+            </label>
+          </div>
+        </div>
       </div>
     </div>,
   );
