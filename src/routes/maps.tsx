@@ -274,13 +274,13 @@ mapRoutes.get('/maps/:uuid', (c) => {
         </div>
       </div>
 
-      <div class="mt-6 grid gap-6 lg:grid-cols-3">
+      <div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         {/*
           CSS only, no JavaScript involved: the grid switch shows the overlay
           through `has-[]` on this column, and the full-size view is a daisyUI
           modal opened and closed by a checkbox.
         */}
-        <div class="lg:col-span-2 has-[#grid-toggle:checked]:[&_.map-grid-overlay]:block">
+        <div class="has-[#grid-toggle:checked]:[&_.map-grid-overlay]:block">
           {hasGrid && (
             <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1">
               <label class="label text-sm text-base-content">
@@ -293,14 +293,16 @@ mapRoutes.get('/maps/:uuid', (c) => {
             </div>
           )}
 
-          <figure class="relative overflow-hidden rounded-box border border-base-300 bg-base-200">
+          {/* Never wider than the image's own pixels: `w-fit` shrinks the
+              figure to the image, so the overlay still covers it exactly. */}
+          <figure class="relative w-fit max-w-full overflow-hidden rounded-box border border-base-300 bg-base-200">
             <label for="full-size" class="block cursor-zoom-in" title="Show full size">
               <img
                 src={`/i/${map.uuid}/full`}
                 alt={map.name}
                 width={map.imageWidth}
                 height={map.imageHeight}
-                class="block h-auto w-full"
+                class="block h-auto max-w-full"
               />
               <span class="sr-only"> — show full size</span>
             </label>

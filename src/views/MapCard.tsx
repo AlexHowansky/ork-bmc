@@ -73,7 +73,7 @@ export const MapCard: FC<{ map: MapRecord }> = ({ map }) => (
 );
 
 export const MapGrid: FC<{ maps: MapRecord[] }> = ({ maps }) => (
-  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+  <div class="grid grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))] gap-4">
     {maps.map((map) => (
       <MapCard map={map} />
     ))}

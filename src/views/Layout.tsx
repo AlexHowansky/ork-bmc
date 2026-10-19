@@ -139,7 +139,7 @@ export const Layout: FC<PropsWithChildren<LayoutProps>> = ({
       </a>
 
       <header class="bg-base-100 shadow-sm">
-        <div class="navbar mx-auto max-w-7xl flex-wrap px-4 sm:px-6 lg:px-8">
+        <div class="navbar flex-wrap px-4 sm:px-6 lg:px-8">
           <div class="navbar-start w-auto gap-2">
             <a href={user ? '/maps' : '/login'} class="btn btn-ghost px-2 text-lg">
               <span aria-hidden="true">🗺️</span>
@@ -184,7 +184,7 @@ export const Layout: FC<PropsWithChildren<LayoutProps>> = ({
         </div>
       </header>
 
-      <main id="main" class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <main id="main" class="px-4 py-8 sm:px-6 lg:px-8">
         {flash && <FlashBanner flash={flash} />}
         {children}
       </main>
